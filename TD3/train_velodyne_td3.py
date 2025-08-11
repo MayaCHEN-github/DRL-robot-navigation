@@ -1,5 +1,8 @@
 import os
 import time
+import rospy
+from geometry_msgs.msg import Pose, Point, Quaternion
+from gazebo_msgs.srv import SpawnModel, GetModelState
 
 import numpy as np
 import torch
@@ -251,6 +254,61 @@ environment_dim = 20
 robot_dim = 4
 env = GazeboEnv("multi_robot_scenario.launch", environment_dim)
 time.sleep(5)
+# === 强制只用本地模型，别联网（确保 model://cardboard_box 命中本地） ===
+os.environ['GAZEBO_MODEL_DATABASE_URI'] = ''
+os.environ['GAZEBO_MODEL_PATH'] = os.pathsep.join([
+    '/home/dev/noetic-gpu/DRL-robot-navigation/catkin_ws/src',
+    os.path.expanduser('~/.gazebo/models'),
+    os.environ.get('GAZEBO_MODEL_PATH', '')
+])
+
+# === 等 Gazebo 服务就绪，并确保 4 个箱子存在；若不存在则本地 spawn ===
+if not rospy.core.is_initialized():
+    rospy.init_node("td3_training_helper", anonymous=True, disable_signals=True)
+
+# 等 /gazebo 服务可用
+rospy.wait_for_service('/gazebo/get_model_state')
+rospy.wait_for_service('/gazebo/spawn_sdf_model')
+
+get_state = rospy.ServiceProxy('/gazebo/get_model_state', GetModelState)
+spawn_model = rospy.ServiceProxy('/gazebo/spawn_sdf_model', SpawnModel)
+
+# 你的本地模型文件（你说的这个路径）
+MODEL_SDF_PATH = '/home/dev/noetic-gpu/DRL-robot-navigation/catkin_ws/src/multi_robot_scenario/models/cardboard_box/model.sdf'
+with open(MODEL_SDF_PATH, 'r') as f:
+    model_xml = f.read()
+
+# 需要的 4 个模型名与初始位姿（随便给个起始位姿，后续你会 set_model_state）
+names_and_poses = [
+    ('cardboard_box_0', Pose(position=Point(0.0, 0.0, 0.25), orientation=Quaternion(0,0,0,1))),
+    ('cardboard_box_1', Pose(position=Point(1.0, 0.0, 0.25), orientation=Quaternion(0,0,0,1))),
+    ('cardboard_box_2', Pose(position=Point(2.0, 0.0, 0.25), orientation=Quaternion(0,0,0,1))),
+    ('cardboard_box_3', Pose(position=Point(3.0, 0.0, 0.25), orientation=Quaternion(0,0,0,1))),
+]
+
+for name, pose in names_and_poses:
+    ok = False
+    # 最多等 10 秒看是否已存在（世界里可能自带）
+    for _ in range(100):
+        try:
+            if get_state(name, 'world').success:
+                ok = True
+                break
+        except Exception:
+            pass
+        rospy.sleep(0.1)
+
+    if not ok:
+        # 不存在就从本地 SDF 生成
+        try:
+            spawn_model(model_name=name, model_xml=model_xml,
+                        robot_namespace='/', initial_pose=pose, reference_frame='world')
+            # 小等一会儿
+            rospy.sleep(0.1)
+        except Exception as e:
+            print(f"[WARN] spawn {name} failed: {e}")
+
+
 torch.manual_seed(seed)
 np.random.seed(seed)
 state_dim = environment_dim + robot_dim

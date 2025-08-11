@@ -1,8 +1,14 @@
 <launch>
 <arg name="gui" value="false"/>
 
-   <!-- Gazebo  -->
-  <include file="$(find multi_robot_scenario)/launch/empty_world.launch" />
+  <!-- 禁用在线模型库，强制用本地模型 -->
+  <env name="GAZEBO_MODEL_DATABASE_URI" value=""/>
+
+  <!-- Gazebo：显式传入你本地的 TD3.world -->
+  <include file="$(find multi_robot_scenario)/launch/empty_world.launch">
+    <arg name="world_name" value="$(find multi_robot_scenario)/launch/TD3.world"/>
+    <arg name="gui" value="$(arg gui)"/>
+  </include>
 
   <!-- Robot with diff drive -->
   <include file="$(find multi_robot_scenario)/launch/pioneer3dx.gazebo.launch">
