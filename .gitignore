@@ -1,0 +1,15 @@
+# caches
+__pycache__/
+*__pycache__*
+
+# catkin build files
+build_isolated/
+devel_isolated/
+.catkin_workspace
+
+# checkpoints
+*.pth
+*.npy
+
+# logs
+runs/
