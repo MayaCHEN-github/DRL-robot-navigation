@@ -218,205 +218,209 @@ class TD3(object):
             torch.load("%s/%s_critic.pth" % (directory, filename))
         )
 
+def main():
+    # Set the parameters for the implementation
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # cuda or cpu
+    seed = 0  # Random seed number
+    eval_freq = 5e3  # After how many steps to perform the evaluation
+    max_ep = 500  # maximum number of steps per episode
+    eval_ep = 10  # number of episodes for evaluation
+    max_timesteps = 5e6  # Maximum number of steps to perform
+    expl_noise = 1  # Initial exploration noise starting value in range [expl_min ... 1]
+    expl_decay_steps = (
+        500000  # Number of steps over which the initial exploration noise will decay over
+    )
+    expl_min = 0.1  # Exploration noise after the decay in range [0...expl_noise]
+    batch_size = 40  # Size of the mini-batch
+    discount = 0.99999  # Discount factor to calculate the discounted future reward (should be close to 1)
+    tau = 0.005  # Soft target update variable (should be close to 0)
+    policy_noise = 0.2  # Added noise for exploration
+    noise_clip = 0.5  # Maximum clamping values of the noise
+    policy_freq = 2  # Frequency of Actor network updates
+    buffer_size = 1e6  # Maximum size of the buffer
+    file_name = "TD3_velodyne"  # name of the file to store the policy
+    save_model = True  # Weather to save the model or not
+    load_model = False  # Weather to load a stored model
+    random_near_obstacle = True  # To take random actions near obstacles or not
 
-# Set the parameters for the implementation
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # cuda or cpu
-seed = 0  # Random seed number
-eval_freq = 5e3  # After how many steps to perform the evaluation
-max_ep = 500  # maximum number of steps per episode
-eval_ep = 10  # number of episodes for evaluation
-max_timesteps = 5e6  # Maximum number of steps to perform
-expl_noise = 1  # Initial exploration noise starting value in range [expl_min ... 1]
-expl_decay_steps = (
-    500000  # Number of steps over which the initial exploration noise will decay over
-)
-expl_min = 0.1  # Exploration noise after the decay in range [0...expl_noise]
-batch_size = 40  # Size of the mini-batch
-discount = 0.99999  # Discount factor to calculate the discounted future reward (should be close to 1)
-tau = 0.005  # Soft target update variable (should be close to 0)
-policy_noise = 0.2  # Added noise for exploration
-noise_clip = 0.5  # Maximum clamping values of the noise
-policy_freq = 2  # Frequency of Actor network updates
-buffer_size = 1e6  # Maximum size of the buffer
-file_name = "TD3_velodyne"  # name of the file to store the policy
-save_model = True  # Weather to save the model or not
-load_model = False  # Weather to load a stored model
-random_near_obstacle = True  # To take random actions near obstacles or not
+    # Create the network storage folders
+    if not os.path.exists("./results"):
+        os.makedirs("./results")
+    if save_model and not os.path.exists("./pytorch_models"):
+        os.makedirs("./pytorch_models")
 
-# Create the network storage folders
-if not os.path.exists("./results"):
-    os.makedirs("./results")
-if save_model and not os.path.exists("./pytorch_models"):
-    os.makedirs("./pytorch_models")
+    # Create the training environment
+    environment_dim = 20
+    robot_dim = 4
+    env = GazeboEnv("multi_robot_scenario.launch", environment_dim)
+    time.sleep(5)
+    # === 强制只用本地模型，别联网（确保 model://cardboard_box 命中本地） ===
+    os.environ['GAZEBO_MODEL_DATABASE_URI'] = ''
+    os.environ['GAZEBO_MODEL_PATH'] = os.pathsep.join([
+        '/home/dev/noetic-gpu/DRL-robot-navigation/catkin_ws/src',
+        os.path.expanduser('~/.gazebo/models'),
+        os.environ.get('GAZEBO_MODEL_PATH', '')
+    ])
 
-# Create the training environment
-environment_dim = 20
-robot_dim = 4
-env = GazeboEnv("multi_robot_scenario.launch", environment_dim)
-time.sleep(5)
-# === 强制只用本地模型，别联网（确保 model://cardboard_box 命中本地） ===
-os.environ['GAZEBO_MODEL_DATABASE_URI'] = ''
-os.environ['GAZEBO_MODEL_PATH'] = os.pathsep.join([
-    '/home/dev/noetic-gpu/DRL-robot-navigation/catkin_ws/src',
-    os.path.expanduser('~/.gazebo/models'),
-    os.environ.get('GAZEBO_MODEL_PATH', '')
-])
+    # === 等 Gazebo 服务就绪，并确保 4 个箱子存在；若不存在则本地 spawn ===
+    if not rospy.core.is_initialized():
+        rospy.init_node("td3_training_helper", anonymous=True, disable_signals=True)
 
-# === 等 Gazebo 服务就绪，并确保 4 个箱子存在；若不存在则本地 spawn ===
-if not rospy.core.is_initialized():
-    rospy.init_node("td3_training_helper", anonymous=True, disable_signals=True)
+    # 等 /gazebo 服务可用
+    rospy.wait_for_service('/gazebo/get_model_state')
+    rospy.wait_for_service('/gazebo/spawn_sdf_model')
 
-# 等 /gazebo 服务可用
-rospy.wait_for_service('/gazebo/get_model_state')
-rospy.wait_for_service('/gazebo/spawn_sdf_model')
+    get_state = rospy.ServiceProxy('/gazebo/get_model_state', GetModelState)
+    spawn_model = rospy.ServiceProxy('/gazebo/spawn_sdf_model', SpawnModel)
 
-get_state = rospy.ServiceProxy('/gazebo/get_model_state', GetModelState)
-spawn_model = rospy.ServiceProxy('/gazebo/spawn_sdf_model', SpawnModel)
+    # 你的本地模型文件（你说的这个路径）
+    MODEL_SDF_PATH = '/home/dev/noetic-gpu/DRL-robot-navigation/catkin_ws/src/multi_robot_scenario/models/cardboard_box/model.sdf'
+    with open(MODEL_SDF_PATH, 'r') as f:
+        model_xml = f.read()
 
-# 你的本地模型文件（你说的这个路径）
-MODEL_SDF_PATH = '/home/dev/noetic-gpu/DRL-robot-navigation/catkin_ws/src/multi_robot_scenario/models/cardboard_box/model.sdf'
-with open(MODEL_SDF_PATH, 'r') as f:
-    model_xml = f.read()
+    # 需要的 4 个模型名与初始位姿（随便给个起始位姿，后续你会 set_model_state）
+    names_and_poses = [
+        ('cardboard_box_0', Pose(position=Point(0.0, 0.0, 0.25), orientation=Quaternion(0,0,0,1))),
+        ('cardboard_box_1', Pose(position=Point(1.0, 0.0, 0.25), orientation=Quaternion(0,0,0,1))),
+        ('cardboard_box_2', Pose(position=Point(2.0, 0.0, 0.25), orientation=Quaternion(0,0,0,1))),
+        ('cardboard_box_3', Pose(position=Point(3.0, 0.0, 0.25), orientation=Quaternion(0,0,0,1))),
+    ]
 
-# 需要的 4 个模型名与初始位姿（随便给个起始位姿，后续你会 set_model_state）
-names_and_poses = [
-    ('cardboard_box_0', Pose(position=Point(0.0, 0.0, 0.25), orientation=Quaternion(0,0,0,1))),
-    ('cardboard_box_1', Pose(position=Point(1.0, 0.0, 0.25), orientation=Quaternion(0,0,0,1))),
-    ('cardboard_box_2', Pose(position=Point(2.0, 0.0, 0.25), orientation=Quaternion(0,0,0,1))),
-    ('cardboard_box_3', Pose(position=Point(3.0, 0.0, 0.25), orientation=Quaternion(0,0,0,1))),
-]
-
-for name, pose in names_and_poses:
-    ok = False
-    # 最多等 10 秒看是否已存在（世界里可能自带）
-    for _ in range(100):
-        try:
-            if get_state(name, 'world').success:
-                ok = True
-                break
-        except Exception:
-            pass
-        rospy.sleep(0.1)
-
-    if not ok:
-        # 不存在就从本地 SDF 生成
-        try:
-            spawn_model(model_name=name, model_xml=model_xml,
-                        robot_namespace='/', initial_pose=pose, reference_frame='world')
-            # 小等一会儿
+    for name, pose in names_and_poses:
+        ok = False
+        # 最多等 10 秒看是否已存在（世界里可能自带）
+        for _ in range(100):
+            try:
+                if get_state(name, 'world').success:
+                    ok = True
+                    break
+            except Exception:
+                pass
             rospy.sleep(0.1)
-        except Exception as e:
-            print(f"[WARN] spawn {name} failed: {e}")
+
+        if not ok:
+            # 不存在就从本地 SDF 生成
+            try:
+                spawn_model(model_name=name, model_xml=model_xml,
+                            robot_namespace='/', initial_pose=pose, reference_frame='world')
+                # 小等一会儿
+                rospy.sleep(0.1)
+            except Exception as e:
+                print(f"[WARN] spawn {name} failed: {e}")
 
 
-torch.manual_seed(seed)
-np.random.seed(seed)
-state_dim = environment_dim + robot_dim
-action_dim = 2
-max_action = 1
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    state_dim = environment_dim + robot_dim
+    action_dim = 2
+    max_action = 1
 
-# Create the network
-network = TD3(state_dim, action_dim, max_action)
-# Create a replay buffer
-replay_buffer = ReplayBuffer(buffer_size, seed)
-if load_model:
-    try:
-        network.load(file_name, "./pytorch_models")
-    except:
-        print(
-            "Could not load the stored model parameters, initializing training with random parameters"
+    # Create the network
+    network = TD3(state_dim, action_dim, max_action)
+    # Create a replay buffer
+    replay_buffer = ReplayBuffer(buffer_size, seed)
+    if load_model:
+        try:
+            network.load(file_name, "./pytorch_models")
+        except:
+            print(
+                "Could not load the stored model parameters, initializing training with random parameters"
+            )
+
+    # Create evaluation data store
+    evaluations = []
+
+    timestep = 0
+    timesteps_since_eval = 0
+    episode_num = 0
+    done = True
+    epoch = 1
+
+    count_rand_actions = 0
+    random_action = []
+
+    # Begin the training loop
+    while timestep < max_timesteps:
+
+        # On termination of episode
+        if done:
+            if timestep != 0:
+                network.train(
+                    replay_buffer,
+                    episode_timesteps,
+                    batch_size,
+                    discount,
+                    tau,
+                    policy_noise,
+                    noise_clip,
+                    policy_freq,
+                )
+
+            if timesteps_since_eval >= eval_freq:
+                print("Validating")
+                timesteps_since_eval %= eval_freq
+                evaluations.append(
+                    evaluate(network=network, epoch=epoch, eval_episodes=eval_ep)
+                )
+                network.save(file_name, directory="./pytorch_models")
+                np.save("./results/%s" % (file_name), evaluations)
+                epoch += 1
+
+            state = env.reset()
+            done = False
+
+            episode_reward = 0
+            episode_timesteps = 0
+            episode_num += 1
+
+        # add some exploration noise
+        if expl_noise > expl_min:
+            expl_noise = expl_noise - ((1 - expl_min) / expl_decay_steps)
+
+        action = network.get_action(np.array(state))
+        action = (action + np.random.normal(0, expl_noise, size=action_dim)).clip(
+            -max_action, max_action
         )
 
-# Create evaluation data store
-evaluations = []
+        # If the robot is facing an obstacle, randomly force it to take a consistent random action.
+        # This is done to increase exploration in situations near obstacles.
+        # Training can also be performed without it
+        if random_near_obstacle:
+            if (
+                np.random.uniform(0, 1) > 0.85
+                and min(state[4:-8]) < 0.6
+                and count_rand_actions < 1
+            ):
+                count_rand_actions = np.random.randint(8, 15)
+                random_action = np.random.uniform(-1, 1, 2)
 
-timestep = 0
-timesteps_since_eval = 0
-episode_num = 0
-done = True
-epoch = 1
+            if count_rand_actions > 0:
+                count_rand_actions -= 1
+                action = random_action
+                action[0] = -1
 
-count_rand_actions = 0
-random_action = []
+        # Update action to fall in range [0,1] for linear velocity and [-1,1] for angular velocity
+        a_in = [(action[0] + 1) / 2, action[1]]
+        next_state, reward, done, target = env.step(a_in)
+        done_bool = 0 if episode_timesteps + 1 == max_ep else int(done)
+        done = 1 if episode_timesteps + 1 == max_ep else int(done)
+        episode_reward += reward
 
-# Begin the training loop
-while timestep < max_timesteps:
+        # Save the tuple in replay buffer
+        replay_buffer.add(state, action, reward, done_bool, next_state)
 
-    # On termination of episode
-    if done:
-        if timestep != 0:
-            network.train(
-                replay_buffer,
-                episode_timesteps,
-                batch_size,
-                discount,
-                tau,
-                policy_noise,
-                noise_clip,
-                policy_freq,
-            )
+        # Update the counters
+        state = next_state
+        episode_timesteps += 1
+        timestep += 1
+        timesteps_since_eval += 1
 
-        if timesteps_since_eval >= eval_freq:
-            print("Validating")
-            timesteps_since_eval %= eval_freq
-            evaluations.append(
-                evaluate(network=network, epoch=epoch, eval_episodes=eval_ep)
-            )
-            network.save(file_name, directory="./pytorch_models")
-            np.save("./results/%s" % (file_name), evaluations)
-            epoch += 1
+    # After the training is done, evaluate the network and save it
+    evaluations.append(evaluate(network=network, epoch=epoch, eval_episodes=eval_ep))
+    if save_model:
+        network.save("%s" % file_name, directory="./pytorch_models")
+    np.save("./results/%s" % file_name, evaluations)
 
-        state = env.reset()
-        done = False
 
-        episode_reward = 0
-        episode_timesteps = 0
-        episode_num += 1
-
-    # add some exploration noise
-    if expl_noise > expl_min:
-        expl_noise = expl_noise - ((1 - expl_min) / expl_decay_steps)
-
-    action = network.get_action(np.array(state))
-    action = (action + np.random.normal(0, expl_noise, size=action_dim)).clip(
-        -max_action, max_action
-    )
-
-    # If the robot is facing an obstacle, randomly force it to take a consistent random action.
-    # This is done to increase exploration in situations near obstacles.
-    # Training can also be performed without it
-    if random_near_obstacle:
-        if (
-            np.random.uniform(0, 1) > 0.85
-            and min(state[4:-8]) < 0.6
-            and count_rand_actions < 1
-        ):
-            count_rand_actions = np.random.randint(8, 15)
-            random_action = np.random.uniform(-1, 1, 2)
-
-        if count_rand_actions > 0:
-            count_rand_actions -= 1
-            action = random_action
-            action[0] = -1
-
-    # Update action to fall in range [0,1] for linear velocity and [-1,1] for angular velocity
-    a_in = [(action[0] + 1) / 2, action[1]]
-    next_state, reward, done, target = env.step(a_in)
-    done_bool = 0 if episode_timesteps + 1 == max_ep else int(done)
-    done = 1 if episode_timesteps + 1 == max_ep else int(done)
-    episode_reward += reward
-
-    # Save the tuple in replay buffer
-    replay_buffer.add(state, action, reward, done_bool, next_state)
-
-    # Update the counters
-    state = next_state
-    episode_timesteps += 1
-    timestep += 1
-    timesteps_since_eval += 1
-
-# After the training is done, evaluate the network and save it
-evaluations.append(evaluate(network=network, epoch=epoch, eval_episodes=eval_ep))
-if save_model:
-    network.save("%s" % file_name, directory="./pytorch_models")
-np.save("./results/%s" % file_name, evaluations)
+if __name__ == "__main__":
+    main()
