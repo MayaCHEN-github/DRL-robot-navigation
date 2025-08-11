@@ -43,13 +43,13 @@ Clone the repository:
 ```shell
 $ cd ~
 ### Clone this repo
-$ git clone https://github.com/reiniscimurs/DRL-robot-navigation
+$ git clone https://github.com/zacz08/DRL-robot-navigation.git
 ```
 The network can be run with a standard 2D laser, but this implementation uses a simulated [3D Velodyne sensor](https://github.com/lmark1/velodyne_simulator)
 
 Compile the workspace:
 ```shell
-$ cd ~/DRL-robot-navigation/catkin_ws
+$ cd DRL-robot-navigation/catkin_ws/
 ### Compile
 $ catkin_make_isolated
 ```
@@ -68,7 +68,7 @@ $ source devel_isolated/setup.bash
 Run the training:
 ```shell
 $ cd ~/DRL-robot-navigation/TD3
-$ python3 train_velodyne_td3.py
+$ python train_velodyne_td3.py
 ```
 
 To check the training process on tensorboard:
@@ -85,7 +85,7 @@ $ killall -9 rosout roslaunch rosmaster gzserver nodelet robot_state_publisher g
 Once training is completed, test the model:
 ```shell
 $ cd ~/DRL-robot-navigation/TD3
-$ python3 test_velodyne_td3.py
+$ python test_velodyne_td3.py
 ```
 
 Gazebo environment:
