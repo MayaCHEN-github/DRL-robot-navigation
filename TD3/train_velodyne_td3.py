@@ -274,8 +274,19 @@ def main():
     spawn_model = rospy.ServiceProxy('/gazebo/spawn_sdf_model', SpawnModel)
 
     # 你的本地模型文件（你说的这个路径）
+    current_dir = os.path.dirname(os.path.abspath(__file__))        # 构建相对路径（假设标准项目结构）    
+    relative_path = os.path.join(        
+        '..',  # 退到TD3上级目录        
+        'catkin_ws',        
+        'src',        
+        'multi_robot_scenario',        
+        'models',        
+        'cardboard_box',        
+        'model.sdf'    
+        )        # 连接为完整路径    
+    model_path = os.path.abspath(os.path.join(current_dir, relative_path))
     MODEL_SDF_PATH = '/home/dev/noetic-gpu/DRL-robot-navigation/catkin_ws/src/multi_robot_scenario/models/cardboard_box/model.sdf'
-    with open(MODEL_SDF_PATH, 'r') as f:
+    with open(model_path, 'r') as f:
         model_xml = f.read()
 
     # 需要的 4 个模型名与初始位姿（随便给个起始位姿，后续你会 set_model_state）
