@@ -92,7 +92,7 @@ class Critic(nn.Module):
 
 # TD3 network
 class TD3(object):
-    def __init__(self, state_dim, action_dim, max_action):
+    def __init__(self, state_dim, action_dim, max_action, device):
         # Initialize the Actor network
         self.actor = Actor(state_dim, action_dim).to(device)
         self.actor_target = Actor(state_dim, action_dim).to(device)
@@ -327,7 +327,7 @@ def main():
     max_action = 1
 
     # Create the network
-    network = TD3(state_dim, action_dim, max_action)
+    network = TD3(state_dim, action_dim, max_action, device)
     # Create a replay buffer
     replay_buffer = ReplayBuffer(buffer_size, seed)
     if load_model:
