@@ -93,15 +93,16 @@ class Critic(nn.Module):
 # TD3 network
 class TD3(object):
     def __init__(self, state_dim, action_dim, max_action, device):
+        self.device = device
         # Initialize the Actor network
-        self.actor = Actor(state_dim, action_dim).to(device)
-        self.actor_target = Actor(state_dim, action_dim).to(device)
+        self.actor = Actor(state_dim, action_dim).to(self.device)
+        self.actor_target = Actor(state_dim, action_dim).to(self.device)
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters())
 
         # Initialize the Critic networks
-        self.critic = Critic(state_dim, action_dim).to(device)
-        self.critic_target = Critic(state_dim, action_dim).to(device)
+        self.critic = Critic(state_dim, action_dim).to(self.device)
+        self.critic_target = Critic(state_dim, action_dim).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters())
 
@@ -111,7 +112,7 @@ class TD3(object):
 
     def get_action(self, state):
         # Function to get the action from the actor
-        state = torch.Tensor(state.reshape(1, -1)).to(device)
+        state = torch.Tensor(state.reshape(1, -1)).to(self.device)
         return self.actor(state).cpu().data.numpy().flatten()
 
     # training cycle
@@ -138,17 +139,17 @@ class TD3(object):
                 batch_dones,
                 batch_next_states,
             ) = replay_buffer.sample_batch(batch_size)
-            state = torch.Tensor(batch_states).to(device)
-            next_state = torch.Tensor(batch_next_states).to(device)
-            action = torch.Tensor(batch_actions).to(device)
-            reward = torch.Tensor(batch_rewards).to(device)
-            done = torch.Tensor(batch_dones).to(device)
+            state = torch.Tensor(batch_states).to(self.device)
+            next_state = torch.Tensor(batch_next_states).to(self.device)
+            action = torch.Tensor(batch_actions).to(self.device)
+            reward = torch.Tensor(batch_rewards).to(self.device)
+            done = torch.Tensor(batch_dones).to(self.device)
 
             # Obtain the estimated action from the next state by using the actor-target
             next_action = self.actor_target(next_state)
 
             # Add noise to the action
-            noise = torch.Tensor(batch_actions).data.normal_(0, policy_noise).to(device)
+            noise = torch.Tensor(batch_actions).data.normal_(0, policy_noise).to(self.device)
             noise = noise.clamp(-noise_clip, noise_clip)
             next_action = (next_action + noise).clamp(-self.max_action, self.max_action)
 
