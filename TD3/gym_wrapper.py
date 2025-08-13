@@ -83,7 +83,9 @@ class VelodyneGymWrapper(gym.Env):
             random.seed(seed)
         
         state = self.gazebo_env.reset()
-        return state
+        # gymnasium要求reset()方法返回(observation, info)元组
+        info = {}
+        return state, info
 
     def render(self, mode='human'):
         if mode == 'human':
