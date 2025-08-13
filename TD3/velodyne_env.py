@@ -72,6 +72,9 @@ class GazeboEnv:
         self.environment_dim = environment_dim 
         self.odom_x = 0 # 机器人当前X坐标
         self.odom_y = 0 # 机器人当前Y坐标
+        
+        # 添加标志来跟踪里程计数据是否准备好
+        self.odom_ready = False
 
         self.goal_x = 1 # 目标X坐标
         self.goal_y = 0.0 # 目标Y坐标
@@ -146,6 +149,18 @@ class GazeboEnv:
         self.odom = rospy.Subscriber(
             "/r1/odom", Odometry, self.odom_callback, queue_size=1 # 订阅里程计数据
         )
+        
+        # 等待里程计数据初始化
+        print("等待里程计数据初始化...")
+        timeout = 10.0  # 10秒超时
+        start_time = rospy.Time.now()
+        while not self.odom_ready and (rospy.Time.now() - start_time).to_sec() < timeout:
+            rospy.sleep(0.1)
+        
+        if self.odom_ready:
+            print("里程计数据初始化成功！")
+        else:
+            print("警告：里程计数据初始化超时，可能影响训练效果")
 
     # Read velodyne pointcloud and turn it into distance data, then select the minimum value for each angle
     # range as state representation
@@ -169,10 +184,24 @@ class GazeboEnv:
 
     def odom_callback(self, od_data): # 从里程计数据中获取机器人的最新位置信息
         self.last_odom = od_data
+        self.odom_ready = True  # 标记里程计数据已准备好
 
     # Perform an action and read a new state 执行智能体的动作并返回环境反馈。
     def step(self, action):
         target = False
+
+        # 等待里程计数据准备好
+        if not self.odom_ready:
+            # 如果里程计数据还没有准备好，等待一下
+            rospy.sleep(0.1)
+            if not self.odom_ready:
+                # 如果仍然没有准备好，抛出异常或重置环境
+                print("Error: Odometry data not ready after waiting. Resetting environment...")
+                # 尝试重置环境来获取新的里程计数据
+                self.reset()
+                # 如果重置后仍然没有数据，抛出异常
+                if not self.odom_ready:
+                    raise RuntimeError("Failed to get odometry data after reset. Check ROS topics and Gazebo simulation.")
 
         # Publish the robot action 发布机器人的动作指令
         vel_cmd = Twist()
@@ -206,16 +235,23 @@ class GazeboEnv:
         laser_state = [v_state]
 
         # Calculate robot heading from odometry data 从里程计数据获取机器人位置
-        self.odom_x = self.last_odom.pose.pose.position.x
-        self.odom_y = self.last_odom.pose.pose.position.y
-        quaternion = Quaternion(
-            self.last_odom.pose.pose.orientation.w,
-            self.last_odom.pose.pose.orientation.x,
-            self.last_odom.pose.pose.orientation.y,
-            self.last_odom.pose.pose.orientation.z,
-        )
-        euler = quaternion.to_euler(degrees=False)
-        angle = round(euler[2], 4) # 获取Z轴旋转角度（偏航角）
+        # 检查里程计数据是否可用，如果不可用则使用默认值
+        if self.last_odom is None:
+            # 如果里程计数据还没有准备好，使用默认值
+            self.odom_x = 0.0
+            self.odom_y = 0.0
+            angle = 0.0
+        else:
+            self.odom_x = self.last_odom.pose.pose.position.x
+            self.odom_y = self.last_odom.pose.pose.position.y
+            quaternion = Quaternion(
+                self.last_odom.pose.pose.orientation.w,
+                self.last_odom.pose.pose.orientation.x,
+                self.last_odom.pose.pose.orientation.y,
+                self.last_odom.pose.pose.orientation.z,
+            )
+            euler = quaternion.to_euler(degrees=False)
+            angle = round(euler[2], 4) # 获取Z轴旋转角度（偏航角）
 
         # Calculate distance to the goal from the robot 计算机器人与目标点的欧几里得距离
         distance = np.linalg.norm(
@@ -307,6 +343,21 @@ class GazeboEnv:
         v_state = []
         v_state[:] = self.velodyne_data[:]
         laser_state = [v_state]
+
+        # 在reset方法中，我们需要重新计算角度，因为angle变量在这里没有定义
+        # 从机器人的当前位置和姿态计算角度
+        if self.last_odom is not None:
+            quaternion = Quaternion(
+                self.last_odom.pose.pose.orientation.w,
+                self.last_odom.pose.pose.orientation.x,
+                self.last_odom.pose.pose.orientation.y,
+                self.last_odom.pose.pose.orientation.z,
+            )
+            euler = quaternion.to_euler(degrees=False)
+            angle = round(euler[2], 4)
+        else:
+            # 如果里程计数据不可用，使用默认角度
+            angle = 0.0
 
         distance = np.linalg.norm(
             [self.odom_x - self.goal_x, self.odom_y - self.goal_y]
