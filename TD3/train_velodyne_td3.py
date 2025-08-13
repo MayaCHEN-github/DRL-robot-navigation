@@ -284,8 +284,8 @@ def main():
         'models',        
         'cardboard_box',        
         'model.sdf'    
-        )         
-    model_path = os.path.abspath(os.path.join(current_dir, relative_path)) # 连接为完整路径   
+        )        # 连接为完整路径    
+    model_path = os.path.abspath(os.path.join(current_dir, relative_path))
     MODEL_SDF_PATH = '/home/dev/noetic-gpu/DRL-robot-navigation/catkin_ws/src/multi_robot_scenario/models/cardboard_box/model.sdf'
     with open(model_path, 'r') as f:
         model_xml = f.read()
