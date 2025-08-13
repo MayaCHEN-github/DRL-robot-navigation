@@ -29,7 +29,7 @@ def test_model(model, env):
     while not done and step_count < 100:
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, terminated, truncated, info = env.step(action)
-        done = terminated or truncated  # 合并terminated和truncated
+        done = terminated or truncated  
         episode_reward += reward
         step_count += 1
         
