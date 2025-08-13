@@ -93,9 +93,9 @@ def main():
     callbacks = [checkpoint_callback, eval_callback]
     
     # 快速验证
-    print("=== 第一阶段：快速验证（1000步）===")
+    print("=== 第一阶段：快速验证（2048步）===")
     model.learn(
-        total_timesteps=1_000,   # 1000步
+        total_timesteps=2_048,   # 2048步，匹配PPO的n_steps参数
         progress_bar=True,
         callback=callbacks
     )
