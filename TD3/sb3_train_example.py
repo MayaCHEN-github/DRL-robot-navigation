@@ -42,12 +42,26 @@ def main():
     print("正在创建PPO模型...")
     model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="./logs/")
 
-    # 训练模型
-    print("开始训练...")
+    # 渐进式训练测试
+    print("=== 第一阶段：快速验证（5000步）===")
     model.learn(
-        total_timesteps=1_000_000,  # 总训练步数
-        progress_bar=True           # 显示进度条
+        total_timesteps=500,    # 先用100步快速验证
+        progress_bar=True
     )
+    
+    print("✅ 第一阶段完成！程序运行正常。")
+    
+    # 询问是否继续训练
+    user_input = input("程序运行正常！是否继续训练更多步数？(y/n): ")
+    if user_input.lower() == 'y':
+        print("=== 第二阶段：正式训练（10万步）===")
+        model.learn(
+            total_timesteps=100_000,  # 正式训练
+            progress_bar=True
+        )
+        print("✅ 训练完成！")
+    else:
+        print("训练已停止。")
 
     # 保存模型
     print("正在保存模型...")
