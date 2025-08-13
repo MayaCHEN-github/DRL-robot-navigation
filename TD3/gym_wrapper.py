@@ -73,7 +73,13 @@ class VelodyneGymWrapper(gym.Env):
             # 有必要的话再添加新的调试信息！
         }
 
-        return state, reward, done, info
+        # gymnasium要求step()方法返回5个值：(observation, reward, terminated, truncated, info)
+        # terminated: episode自然结束（到达目标或碰撞）
+        # truncated: episode被外部因素中断（达到最大步数等）
+        terminated = done  # 我们的环境使用done表示episode结束
+        truncated = False  # 目前没有外部中断机制
+        
+        return state, reward, terminated, truncated, info
 
 
     def reset(self, seed=None, options=None):
