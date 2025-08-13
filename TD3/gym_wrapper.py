@@ -1,6 +1,7 @@
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 import numpy as np
+import random
 from velodyne_env import GazeboEnv
 
 class VelodyneGymWrapper(gym.Env):
@@ -75,7 +76,12 @@ class VelodyneGymWrapper(gym.Env):
         return state, reward, done, info
 
 
-    def reset(self):
+    def reset(self, seed=None, options=None):
+        # 如果提供了seed参数，设置随机种子
+        if seed is not None:
+            np.random.seed(seed)
+            random.seed(seed)
+        
         state = self.gazebo_env.reset()
         return state
 
