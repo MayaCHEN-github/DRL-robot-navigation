@@ -20,7 +20,7 @@ class EvaluationCallback(BaseCallback):
         return True
 
 def test_model(model, env):
-    obs = env.reset()
+    obs, info = env.reset()  # 正确解包reset()的返回值
     episode_reward = 0
     done = False
     step_count = 0
