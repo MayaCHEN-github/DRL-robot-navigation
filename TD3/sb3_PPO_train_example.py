@@ -1,9 +1,23 @@
 import numpy as np
 import os
 from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from gym_wrapper import VelodyneGymWrapper
 from evaluation_wrapper import EvaluationWrapper
+
+class EvaluationCallback(BaseCallback):
+    """评估回调，每5000步触发一次（与TD3和DQN文件保持一致）"""
+    def __init__(self, eval_freq=5000, verbose=1):
+        super().__init__(verbose)
+        self.eval_freq = eval_freq
+        self.last_eval = 0
+        
+    def _on_step(self) -> bool:
+        if self.num_timesteps - self.last_eval >= self.eval_freq:
+            self.last_eval = self.num_timesteps
+            if self.verbose > 0:
+                print(f"\n=== 评估触发（第{self.num_timesteps}步）===")
+        return True
 
 def test_model(model, env):
     obs = env.reset()
@@ -45,8 +59,7 @@ def main():
         env, 
         verbose=1, 
         tensorboard_log="./logs/",
-        eval_freq=eval_freq, # 每5000步评估一次
-        n_eval_episodes=10,  # 评估时运行10个episode
+        # 超参数设置
         learning_rate=3e-4,
         n_steps=2048,
         batch_size=64,
@@ -70,23 +83,32 @@ def main():
         name_prefix="ppo_velodyne"
     )
     
+    # 设置评估回调（每5000步触发一次，与其他文件保持一致）
+    eval_callback = EvaluationCallback(
+        eval_freq=eval_freq,
+        verbose=1
+    )
+    
+    # 组合所有回调函数
+    callbacks = [checkpoint_callback, eval_callback]
+    
     # 快速验证
     print("=== 第一阶段：快速验证（1000步）===")
     model.learn(
         total_timesteps=1_000,   # 1000步
         progress_bar=True,
-        callback=checkpoint_callback
+        callback=callbacks
     )
     print("✅ 第一阶段完成！程序运行正常。")
     
     # 正式训练
     user_input = input("程序运行正常！是否继续训练更多步数？(y/n): ")
     if user_input.lower() == 'y':
-        print("=== 第二阶段：正式训练（与其他文件保持一致）===")
+        print("=== 第二阶段：正式训练（500万步）===")
         model.learn(
             total_timesteps=5_000_000,  # 500万步，与TD3和DQN两份文件保持一致。
             progress_bar=True,
-            callback=checkpoint_callback
+            callback=callbacks
         )
         print("✅ 训练完成！")
     else:
