@@ -15,7 +15,7 @@ from replay_buffer import ReplayBuffer
 from velodyne_env import GazeboEnv
 
 
-def evaluate(network, epoch, eval_episodes=10):
+def evaluate(network, epoch, env, eval_episodes=10):
     avg_reward = 0.0
     col = 0
     for _ in range(eval_episodes):
@@ -372,7 +372,7 @@ def main():
                 print("Validating")
                 timesteps_since_eval %= eval_freq
                 evaluations.append(
-                    evaluate(network=network, epoch=epoch, eval_episodes=eval_ep)
+                    evaluate(network=network, epoch=epoch, env=env, eval_episodes=eval_ep)
                 )
                 network.save(file_name, directory="./pytorch_models")
                 np.save("./results/%s" % (file_name), evaluations)
@@ -428,7 +428,7 @@ def main():
         timesteps_since_eval += 1
 
     # After the training is done, evaluate the network and save it
-    evaluations.append(evaluate(network=network, epoch=epoch, eval_episodes=eval_ep))
+    evaluations.append(evaluate(network=network, epoch=epoch, env=env, eval_episodes=eval_ep))
     if save_model:
         network.save("%s" % file_name, directory="./pytorch_models")
     np.save("./results/%s" % file_name, evaluations)
