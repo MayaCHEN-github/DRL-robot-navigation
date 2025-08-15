@@ -8,22 +8,22 @@ from velodyne_env import GazeboEnv
 class VelodyneGymWrapper(gym.Env):
     """
     将VelodyneEnv包装成Gym环境, 方便使用Gym的API。
-    支持CUDA加速，确保观测数据在正确的设备上。
+    支持CUDA检测，但返回numpy数组以确保与stable-baselines3兼容。
     """
     def __init__(self, launchfile, environment_dim, action_type="continuous", device=None):
         super().__init__()
 
-        # 检测CUDA设备
+        # 检测CUDA设备（仅用于信息显示，不强制转换数据）
         if device is None:
             if torch.cuda.is_available():
                 device = "cuda"
-                print(f"✅ 环境检测到CUDA，将使用设备: {device}")
+                print(f"✅ 环境检测到CUDA可用，模型将使用GPU加速")
             else:
                 device = "cpu"
-                print(f"⚠️  CUDA不可用，环境将使用CPU")
+                print(f"⚠️  CUDA不可用，模型将使用CPU")
         
         self.device = device
-        print(f"🎯 环境设备: {self.device}")
+        print(f"🎯 环境设备检测: {self.device} (观测数据保持numpy格式)")
 
         # 创建GazeboEnv实例
         self.gazebo_env = GazeboEnv(launchfile, environment_dim)
@@ -74,26 +74,19 @@ class VelodyneGymWrapper(gym.Env):
             dtype=np.float32
         )
 
-    def _ensure_tensor_on_device(self, data):
+    def _ensure_numpy(self, data):
         """
-        确保数据在正确的设备上，支持CUDA加速
+        确保数据是numpy数组格式，与stable-baselines3兼容
         """
-        if isinstance(data, np.ndarray):
-            # 将numpy数组转换为tensor并移动到指定设备
-            tensor = torch.from_numpy(data).float()
-            if self.device == "cuda":
-                tensor = tensor.cuda()
-            return tensor
-        elif isinstance(data, torch.Tensor):
-            # 如果已经是tensor，确保在正确设备上
-            if self.device == "cuda" and not tensor.is_cuda:
-                tensor = tensor.cuda()
-            elif self.device == "cpu" and tensor.is_cuda:
-                tensor = tensor.cpu()
-            return tensor
-        else:
-            # 其他类型直接返回
+        if isinstance(data, torch.Tensor):
+            # 如果是tensor，转换为numpy数组
+            return data.detach().cpu().numpy()
+        elif isinstance(data, np.ndarray):
+            # 如果已经是numpy数组，直接返回
             return data
+        else:
+            # 其他类型，尝试转换为numpy数组
+            return np.array(data, dtype=np.float32)
 
     def step(self, action):
         if self.action_type == "discrete":
@@ -101,9 +94,8 @@ class VelodyneGymWrapper(gym.Env):
         # 调用GazeboEnv的step方法。返回state，reward，done，target
         state, reward, done, target = self.gazebo_env.step(action)
 
-        # 确保观测数据在正确的设备上（如果使用CUDA）
-        if self.device == "cuda":
-            state = self._ensure_tensor_on_device(state)
+        # 确保观测数据是numpy数组格式，与stable-baselines3兼容
+        state = self._ensure_numpy(state)
 
         # 构建info字典，包含额外信息
         info = {
@@ -128,9 +120,8 @@ class VelodyneGymWrapper(gym.Env):
         
         state = self.gazebo_env.reset()
         
-        # 确保观测数据在正确的设备上（如果使用CUDA）
-        if self.device == "cuda":
-            state = self._ensure_tensor_on_device(state)
+        # 确保观测数据是numpy数组格式，与stable-baselines3兼容
+        state = self._ensure_numpy(state)
         
         # gymnasium要求reset()方法返回(observation, info)元组
         info = {'device': self.device}
