@@ -35,7 +35,7 @@ def main():
         "MlpPolicy", 
         env, 
         verbose=1, 
-        tensorboard_log="./logs/",
+        tensorboard_log="./logs/dqn_velodyne",
         learning_rate=1e-3,
         buffer_size=1_000_000,
         batch_size=64,

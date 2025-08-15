@@ -58,7 +58,7 @@ def main():
         "MlpPolicy", 
         env, 
         verbose=1, 
-        tensorboard_log="./logs/",
+        tensorboard_log="./logs/ppo_velodyne",
         # 超参数设置
         learning_rate=3e-4,
         n_steps=2048,
