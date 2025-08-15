@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import torch
 from stable_baselines3 import DQN
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from gym_wrapper import VelodyneGymWrapper
@@ -19,12 +20,27 @@ class EvaluationCallback(BaseCallback):
         return True
 
 def main():
+    # 检查CUDA可用性
+    print("=== CUDA检测 ===")
+    print(f"PyTorch版本: {torch.__version__}")
+    print(f"CUDA可用: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"CUDA设备数量: {torch.cuda.device_count()}")
+        print(f"当前CUDA设备: {torch.cuda.current_device()}")
+        print(f"CUDA设备名称: {torch.cuda.get_device_name(0)}")
+        device = "cuda"
+    else:
+        print("⚠️  CUDA不可用，将使用CPU")
+        device = "cpu"
+    print("=" * 20)
+
     # 创建环境
     print("正在创建训练环境...")
     env = VelodyneGymWrapper(
         launchfile="multi_robot_scenario.launch",
         environment_dim=20,
-        action_type="discrete"  # 使用离散动作空间（DQN算法）
+        action_type="discrete",  # 使用离散动作空间（DQN算法）
+        device=device  # 传递设备信息给环境
     )
 
     # 创建DQN模型
@@ -40,7 +56,13 @@ def main():
         buffer_size=1_000_000,
         batch_size=64,
         gamma=0.999,  # 与train_dqn.py的discount保持一致
+        device=device,  # 明确指定使用CUDA或CPU
     )
+
+    # 验证模型设备
+    print(f"✅ DQN模型已创建在设备: {device}")
+    if device == "cuda":
+        print(f"模型参数设备: {next(model.policy.parameters()).device}")
 
     # 创建保存目录
     if not os.path.exists("./pytorch_models"):

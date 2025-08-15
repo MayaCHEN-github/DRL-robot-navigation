@@ -2,14 +2,28 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import random
+import torch
 from velodyne_env import GazeboEnv
 
 class VelodyneGymWrapper(gym.Env):
     """
     将VelodyneEnv包装成Gym环境, 方便使用Gym的API。
+    支持CUDA加速，确保观测数据在正确的设备上。
     """
-    def __init__(self, launchfile, environment_dim, action_type="continuous"):
+    def __init__(self, launchfile, environment_dim, action_type="continuous", device=None):
         super().__init__()
+
+        # 检测CUDA设备
+        if device is None:
+            if torch.cuda.is_available():
+                device = "cuda"
+                print(f"✅ 环境检测到CUDA，将使用设备: {device}")
+            else:
+                device = "cpu"
+                print(f"⚠️  CUDA不可用，环境将使用CPU")
+        
+        self.device = device
+        print(f"🎯 环境设备: {self.device}")
 
         # 创建GazeboEnv实例
         self.gazebo_env = GazeboEnv(launchfile, environment_dim)
@@ -60,16 +74,41 @@ class VelodyneGymWrapper(gym.Env):
             dtype=np.float32
         )
 
-    
+    def _ensure_tensor_on_device(self, data):
+        """
+        确保数据在正确的设备上，支持CUDA加速
+        """
+        if isinstance(data, np.ndarray):
+            # 将numpy数组转换为tensor并移动到指定设备
+            tensor = torch.from_numpy(data).float()
+            if self.device == "cuda":
+                tensor = tensor.cuda()
+            return tensor
+        elif isinstance(data, torch.Tensor):
+            # 如果已经是tensor，确保在正确设备上
+            if self.device == "cuda" and not tensor.is_cuda:
+                tensor = tensor.cuda()
+            elif self.device == "cpu" and tensor.is_cuda:
+                tensor = tensor.cpu()
+            return tensor
+        else:
+            # 其他类型直接返回
+            return data
+
     def step(self, action):
         if self.action_type == "discrete":
             action = self.action_mapping[action] # 将离散动作索引转换为连续动作值
         # 调用GazeboEnv的step方法。返回state，reward，done，target
         state, reward, done, target = self.gazebo_env.step(action)
 
+        # 确保观测数据在正确的设备上（如果使用CUDA）
+        if self.device == "cuda":
+            state = self._ensure_tensor_on_device(state)
+
         # 构建info字典，包含额外信息
         info = {
             'target_reached': target,  # 是否到达目标
+            'device': self.device,     # 添加设备信息
             # 有必要的话再添加新的调试信息！
         }
 
@@ -81,7 +120,6 @@ class VelodyneGymWrapper(gym.Env):
         
         return state, reward, terminated, truncated, info
 
-
     def reset(self, seed=None, options=None):
         # 如果提供了seed参数，设置随机种子
         if seed is not None:
@@ -89,8 +127,13 @@ class VelodyneGymWrapper(gym.Env):
             random.seed(seed)
         
         state = self.gazebo_env.reset()
+        
+        # 确保观测数据在正确的设备上（如果使用CUDA）
+        if self.device == "cuda":
+            state = self._ensure_tensor_on_device(state)
+        
         # gymnasium要求reset()方法返回(observation, info)元组
-        info = {}
+        info = {'device': self.device}
         return state, info
 
     def render(self, mode='human'):

@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from gym_wrapper import VelodyneGymWrapper
@@ -41,13 +42,27 @@ def test_model(model, env):
     return False
 
 def main():
+    # 检查CUDA可用性
+    print("=== CUDA检测 ===")
+    print(f"PyTorch版本: {torch.__version__}")
+    print(f"CUDA可用: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"CUDA设备数量: {torch.cuda.device_count()}")
+        print(f"当前CUDA设备: {torch.cuda.current_device()}")
+        print(f"CUDA设备名称: {torch.cuda.get_device_name(0)}")
+        device = "cuda"
+    else:
+        print("⚠️  CUDA不可用，将使用CPU")
+        device = "cpu"
+    print("=" * 20)
 
     # 创建环境
     print("正在创建训练环境...")
     env = VelodyneGymWrapper(
         launchfile="multi_robot_scenario.launch",
         environment_dim=20,
-        action_type="continuous"  # 使用连续动作空间（PPO算法）
+        action_type="continuous",  # 使用连续动作空间（PPO算法）
+        device=device  # 传递设备信息给环境
     )
 
     # 创建PPO模型
@@ -69,8 +84,14 @@ def main():
         clip_range=0.2,
         ent_coef=0.01,
         vf_coef=0.5,
-        max_grad_norm=0.5
+        max_grad_norm=0.5,
+        device=device,  # 明确指定使用CUDA或CPU
     )
+
+    # 验证模型设备
+    print(f"✅ PPO模型已创建在设备: {device}")
+    if device == "cuda":
+        print(f"模型参数设备: {next(model.policy.parameters()).device}")
 
     # 创建保存目录
     if not os.path.exists("./pytorch_models"):
