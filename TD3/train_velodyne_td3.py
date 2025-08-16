@@ -15,7 +15,7 @@ from replay_buffer import ReplayBuffer
 from velodyne_env import GazeboEnv
 
 
-def evaluate(network, epoch, eval_episodes=10):
+def evaluate(network, epoch, env, eval_episodes=10):
     avg_reward = 0.0
     col = 0
     for _ in range(eval_episodes):
@@ -92,16 +92,17 @@ class Critic(nn.Module):
 
 # TD3 network
 class TD3(object):
-    def __init__(self, state_dim, action_dim, max_action):
+    def __init__(self, state_dim, action_dim, max_action, device):
+        self.device = device
         # Initialize the Actor network
-        self.actor = Actor(state_dim, action_dim).to(device)
-        self.actor_target = Actor(state_dim, action_dim).to(device)
+        self.actor = Actor(state_dim, action_dim).to(self.device)
+        self.actor_target = Actor(state_dim, action_dim).to(self.device)
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters())
 
         # Initialize the Critic networks
-        self.critic = Critic(state_dim, action_dim).to(device)
-        self.critic_target = Critic(state_dim, action_dim).to(device)
+        self.critic = Critic(state_dim, action_dim).to(self.device)
+        self.critic_target = Critic(state_dim, action_dim).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters())
 
@@ -111,7 +112,7 @@ class TD3(object):
 
     def get_action(self, state):
         # Function to get the action from the actor
-        state = torch.Tensor(state.reshape(1, -1)).to(device)
+        state = torch.Tensor(state.reshape(1, -1)).to(self.device)
         return self.actor(state).cpu().data.numpy().flatten()
 
     # training cycle
@@ -138,17 +139,17 @@ class TD3(object):
                 batch_dones,
                 batch_next_states,
             ) = replay_buffer.sample_batch(batch_size)
-            state = torch.Tensor(batch_states).to(device)
-            next_state = torch.Tensor(batch_next_states).to(device)
-            action = torch.Tensor(batch_actions).to(device)
-            reward = torch.Tensor(batch_rewards).to(device)
-            done = torch.Tensor(batch_dones).to(device)
+            state = torch.Tensor(batch_states).to(self.device)
+            next_state = torch.Tensor(batch_next_states).to(self.device)
+            action = torch.Tensor(batch_actions).to(self.device)
+            reward = torch.Tensor(batch_rewards).to(self.device)
+            done = torch.Tensor(batch_dones).to(self.device)
 
             # Obtain the estimated action from the next state by using the actor-target
             next_action = self.actor_target(next_state)
 
             # Add noise to the action
-            noise = torch.Tensor(batch_actions).data.normal_(0, policy_noise).to(device)
+            noise = torch.Tensor(batch_actions).data.normal_(0, policy_noise).to(self.device)
             noise = noise.clamp(-noise_clip, noise_clip)
             next_action = (next_action + noise).clamp(-self.max_action, self.max_action)
 
@@ -274,8 +275,19 @@ def main():
     spawn_model = rospy.ServiceProxy('/gazebo/spawn_sdf_model', SpawnModel)
 
     # 你的本地模型文件（你说的这个路径）
+    current_dir = os.path.dirname(os.path.abspath(__file__))        # 构建相对路径（假设标准项目结构）    
+    relative_path = os.path.join(        
+        '..',  # 退到TD3上级目录        
+        'catkin_ws',        
+        'src',        
+        'multi_robot_scenario',        
+        'models',        
+        'cardboard_box',        
+        'model.sdf'    
+        )        # 连接为完整路径    
+    model_path = os.path.abspath(os.path.join(current_dir, relative_path))
     MODEL_SDF_PATH = '/home/dev/noetic-gpu/DRL-robot-navigation/catkin_ws/src/multi_robot_scenario/models/cardboard_box/model.sdf'
-    with open(MODEL_SDF_PATH, 'r') as f:
+    with open(model_path, 'r') as f:
         model_xml = f.read()
 
     # 需要的 4 个模型名与初始位姿（随便给个起始位姿，后续你会 set_model_state）
@@ -316,7 +328,7 @@ def main():
     max_action = 1
 
     # Create the network
-    network = TD3(state_dim, action_dim, max_action)
+    network = TD3(state_dim, action_dim, max_action, device)
     # Create a replay buffer
     replay_buffer = ReplayBuffer(buffer_size, seed)
     if load_model:
@@ -360,7 +372,7 @@ def main():
                 print("Validating")
                 timesteps_since_eval %= eval_freq
                 evaluations.append(
-                    evaluate(network=network, epoch=epoch, eval_episodes=eval_ep)
+                    evaluate(network=network, epoch=epoch, env=env, eval_episodes=eval_ep)
                 )
                 network.save(file_name, directory="./pytorch_models")
                 np.save("./results/%s" % (file_name), evaluations)
@@ -416,7 +428,7 @@ def main():
         timesteps_since_eval += 1
 
     # After the training is done, evaluate the network and save it
-    evaluations.append(evaluate(network=network, epoch=epoch, eval_episodes=eval_ep))
+    evaluations.append(evaluate(network=network, epoch=epoch, env=env, eval_episodes=eval_ep))
     if save_model:
         network.save("%s" % file_name, directory="./pytorch_models")
     np.save("./results/%s" % file_name, evaluations)
