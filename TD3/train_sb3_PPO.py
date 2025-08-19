@@ -4,7 +4,7 @@ import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from gym_wrapper import VelodyneGymWrapper
-from evaluation_wrapper import EvaluationWrapper
+from TD3.plain_evaluation import EvaluationWrapper
 
 class EvaluationCallback(BaseCallback):
     """评估回调，每5000步触发一次（与TD3和DQN文件保持一致）"""
@@ -67,24 +67,25 @@ def main():
 
     # 创建PPO模型
     print("正在创建PPO模型...")
-    # 设置与其他训练文件一致的参数
+    # 训练节奏：每5000步评估/保存一次，目标总步数≈250k
     eval_freq = 5_000  # 每5000步评估一次，与TD3和DQN保持一致
     model = PPO(
-        "MlpPolicy", 
-        env, 
-        verbose=1, 
+        "MlpPolicy",
+        env,
+        verbose=1,
         tensorboard_log="./logs/ppo_velodyne",
-        # 超参数设置
-        learning_rate=3e-4,
-        n_steps=2048,
-        batch_size=64,
-        n_epochs=10,
-        gamma=0.99,
+        # 超参数设置（加速早期学习并减少每次迭代耗时）
+        learning_rate=7e-4,
+        n_steps=1024,
+        batch_size=512,
+        n_epochs=5,
+        gamma=0.98,
         gae_lambda=0.95,
         clip_range=0.2,
-        ent_coef=0.01,
+        ent_coef=0.005,
         vf_coef=0.5,
         max_grad_norm=0.5,
+        target_kl=0.02,
         device=device,  # 明确指定使用CUDA或CPU
     )
 
@@ -114,9 +115,9 @@ def main():
     callbacks = [checkpoint_callback, eval_callback]
     
     # 快速验证
-    print("=== 第一阶段：快速验证（2048步）===")
+    print("=== 第一阶段：快速验证（5000步）===")
     model.learn(
-        total_timesteps=2_048,   # 2048步，匹配PPO的n_steps参数
+        total_timesteps=5_000,   # 5000步，对齐checkpoint/eval频率
         progress_bar=True,
         callback=callbacks
     )
@@ -125,11 +126,12 @@ def main():
     # 正式训练
     user_input = input("程序运行正常！是否继续训练更多步数？(y/n): ")
     if user_input.lower() == 'y':
-        print("=== 第二阶段：正式训练（500万步）===")
+        print("=== 第二阶段：正式训练（245000步，延续同一模型与时间轴）===")
         model.learn(
-            total_timesteps=5_000_000,  # 500万步，与TD3和DQN两份文件保持一致。
+            total_timesteps=245_000,  # 与第一阶段合计约25万步，≈50个checkpoint
             progress_bar=True,
-            callback=callbacks
+            callback=callbacks,
+            reset_num_timesteps=False  # 关键：不重置时间步，继续同一模型
         )
         print("✅ 训练完成！")
     else:
