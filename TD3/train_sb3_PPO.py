@@ -4,7 +4,6 @@ import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from gym_wrapper import VelodyneGymWrapper
-from TD3.plain_evaluation import EvaluationWrapper
 
 class EvaluationCallback(BaseCallback):
     """评估回调，每5000步触发一次（与TD3和DQN文件保持一致）"""
