@@ -6,17 +6,29 @@ from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from gym_wrapper import VelodyneGymWrapper
 
 class EvaluationCallback(BaseCallback):
-    """评估回调，每5000步触发一次"""
-    def __init__(self, eval_freq=5000, verbose=1):
+    """评估回调, 每5000步触发一次，并在5万步时询问是否继续训练"""
+    def __init__(self, eval_freq=5000, verbose=1, checkpoint_step=50000):
         super().__init__(verbose)
         self.eval_freq = eval_freq
         self.last_eval = 0
+        self.checkpoint_step = checkpoint_step
+        self.checkpoint_reached = False
         
     def _on_step(self) -> bool:
+        # 常规评估逻辑
         if self.num_timesteps - self.last_eval >= self.eval_freq:
             self.last_eval = self.num_timesteps
             if self.verbose > 0:
                 print(f"\n=== 评估触发（第{self.num_timesteps}步）===")
+
+        # 5万步检查点逻辑
+        if self.num_timesteps >= self.checkpoint_step and not self.checkpoint_reached:
+            self.checkpoint_reached = True
+            print(f"\n=== 已达到{self.checkpoint_step}步检查点 ===")
+            user_input = input("是否继续训练？(y/n): ")
+            if user_input.lower() != 'y':
+                print("训练已停止。")
+                return False
         return True
 
 def main():
@@ -52,16 +64,16 @@ def main():
         env,
         verbose=1,
         tensorboard_log="./logs/dqn_velodyne",
-        learning_rate=2e-3,
+        learning_rate=5e-4,  # 降低学习率以提高稳定性
         buffer_size=200_000,
-        batch_size=256,
+        batch_size=128,  # 减小批次大小
         gamma=0.99,
         train_freq=4,
         gradient_steps=4,
-        target_update_interval=5_000,
-        learning_starts=1_000,
-        exploration_fraction=0.5,
-        exploration_final_eps=0.1,
+        target_update_interval=2000,  # 增加目标网络更新频率
+        learning_starts=5000,  # 增加学习起始步数
+        exploration_fraction=0.7,  # 延长探索期
+        exploration_final_eps=0.05,  # 降低最终探索率
         device=device,  # 明确指定使用CUDA或CPU
     )
 
