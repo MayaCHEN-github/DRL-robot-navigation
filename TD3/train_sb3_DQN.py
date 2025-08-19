@@ -60,8 +60,8 @@ def main():
         gradient_steps=4,
         target_update_interval=5_000,
         learning_starts=1_000,
-        exploration_fraction=0.2,
-        exploration_final_eps=0.05,
+        exploration_fraction=0.5,
+        exploration_final_eps=0.1,
         device=device,  # 明确指定使用CUDA或CPU
     )
 
