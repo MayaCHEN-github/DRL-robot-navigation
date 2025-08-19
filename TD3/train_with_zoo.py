@@ -2,8 +2,10 @@
 import os
 import sys
 import argparse
-from rl_zoo3 import train, enjoy, optimize_hyperparams
+from rl_zoo3 import train, enjoy
+from rl_zoo3.hyperparams import optimize_hyperparams
 import yaml
+import gymnasium as gym  # 确保使用gymnasium而不是gym
 
 # 添加项目根目录到Python路径
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
