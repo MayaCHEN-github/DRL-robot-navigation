@@ -49,19 +49,24 @@ def main():
     # TD3 模型（偏向动作平滑与精细控制）
     print("正在创建TD3模型...")
     eval_freq = 5_000
+    # 添加探索噪声衰减参数
+    expl_noise = 1.0  # 初始探索噪声
+    expl_decay_steps = 500_000  # 噪声衰减步数
+    expl_min = 0.1  # 最小探索噪声
+
     model = TD3(
         "MlpPolicy",
         env,
-        verbose=1,
+        verbose=0,
         tensorboard_log="./logs/td3_velodyne",
-        learning_rate=3e-4,
-        buffer_size=300_000,
-        batch_size=256,
+        learning_rate=1e-4,  # 降低学习率
+        buffer_size=1_000_000,  # 增加缓冲区大小
+        batch_size=40,  # 与velodyne版本一致
         tau=0.005,
-        gamma=0.99,
+        gamma=0.99999,  # 与velodyne版本一致
         train_freq=1,
         gradient_steps=1,
-        policy_delay=2,
+        policy_delay=2,  # 与velodyne版本一致
         target_policy_noise=0.2,
         target_noise_clip=0.5,
         device=device,

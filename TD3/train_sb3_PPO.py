@@ -71,7 +71,7 @@ def main():
     model = PPO(
         "MlpPolicy",
         env,
-        verbose=1,
+        verbose=0,
         tensorboard_log="./logs/ppo_velodyne",
         # 超参数设置（加速早期学习并减少每次迭代耗时）
         learning_rate=7e-4,

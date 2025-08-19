@@ -52,7 +52,7 @@ def main():
     model = SAC(
         "MlpPolicy",
         env,
-        verbose=1,
+        verbose=0,
         tensorboard_log="./logs/sac_velodyne",
         learning_rate=3e-4,
         buffer_size=300_000,

@@ -6,13 +6,11 @@ from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from gym_wrapper import VelodyneGymWrapper
 
 class EvaluationCallback(BaseCallback):
-    """评估回调, 每5000步触发一次，并在5万步时询问是否继续训练"""
-    def __init__(self, eval_freq=5000, verbose=1, checkpoint_step=50000):
+    """评估回调, 每5000步触发一次"""
+    def __init__(self, eval_freq=5000, verbose=1):
         super().__init__(verbose)
         self.eval_freq = eval_freq
         self.last_eval = 0
-        self.checkpoint_step = checkpoint_step
-        self.checkpoint_reached = False
         
     def _on_step(self) -> bool:
         # 常规评估逻辑
@@ -20,15 +18,6 @@ class EvaluationCallback(BaseCallback):
             self.last_eval = self.num_timesteps
             if self.verbose > 0:
                 print(f"\n=== 评估触发（第{self.num_timesteps}步）===")
-
-        # 5万步检查点逻辑
-        if self.num_timesteps >= self.checkpoint_step and not self.checkpoint_reached:
-            self.checkpoint_reached = True
-            print(f"\n=== 已达到{self.checkpoint_step}步检查点 ===")
-            user_input = input("是否继续训练？(y/n): ")
-            if user_input.lower() != 'y':
-                print("训练已停止。")
-                return False
         return True
 
 def main():
@@ -62,7 +51,7 @@ def main():
     model = DQN(
         "MlpPolicy",
         env,
-        verbose=1,
+        verbose=0,
         tensorboard_log="./logs/dqn_velodyne",
         learning_rate=5e-4,  # 降低学习率以提高稳定性
         buffer_size=200_000,
