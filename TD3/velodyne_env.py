@@ -126,8 +126,10 @@ class GazeboEnv:
             raise IOError("File " + fullpath + " does not exist")
         # 启动Gazebo仿真
         # 启动Gazebo仿真，添加--gui=false参数禁用图形界面
-        subprocess.Popen(["roslaunch", "-p", port, fullpath, "--gui=false"])
-        print("Gazebo launched!")
+        # 启动Gazebo仿真，添加--gui=false参数禁用图形界面
+        # 注意：--gui参数需要放在launch文件路径之前
+        subprocess.Popen(["roslaunch", "-p", port, "--gui=false", fullpath])
+        print("Gazebo launched with GUI disabled!")
 
         # Set up the ROS publishers and subscribers
         # 创建ROS发布者（Publisher）

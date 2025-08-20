@@ -98,7 +98,7 @@ class HierarchicalRL:
         env = VelodyneGymWrapper(
             launchfile="multi_robot_scenario.launch",  # Gazebo启动文件
             environment_dim=self.environment_dim,  # 默认20
-            action_type="continuous",  # 动作类型为连续
+            action_type="continuous",  # 动作类型为连续，适应低层TD3智能体
             device=self.device  # 计算设备
         )
         print("环境初始化完成!")
@@ -162,10 +162,42 @@ class HierarchicalRL:
             初始化后的DQN Agent
         """
         print("正在初始化高层DQN智能体...")
-        # 高层DQN将20个方向作为离散动作
+        # 为高层DQN创建一个具有离散动作空间的环境
+        from gymnasium import spaces
+        from stable_baselines3.common.env_util import make_vec_env
+        
+        # 高层动作空间：20个方向 × 10个距离级别 = 200个离散动作
+        num_directions = 20
+        num_distances = 10
+        high_level_action_space = spaces.Discrete(num_directions * num_distances)
+        
+        # 创建一个环境包装器，使用离散动作空间
+        class DiscreteActionEnvWrapper:
+            def __init__(self, env):
+                self.env = env
+                self.observation_space = env.observation_space
+                self.action_space = high_level_action_space
+                
+            def reset(self, *args, **kwargs):
+                return self.env.reset(*args, **kwargs)
+            
+            def step(self, action):
+                # 这里不需要实际执行动作，因为高层动作会被解码后传递给低层智能体
+                # 我们只需要返回一个dummy结果
+                state = self.env.reset()[0]
+                return state, 0.0, False, False, {}
+            
+            def render(self, *args, **kwargs):
+                return self.env.render(*args, **kwargs)
+            
+            def close(self):
+                return self.env.close()
+        
+        discrete_env = DiscreteActionEnvWrapper(self.env)
+        
         model = DQN(
             "MlpPolicy", 
-            self.env,
+            discrete_env,
             verbose=0,  
             tensorboard_log="./logs/high_level_dqn",  # 日志保存路径
             learning_rate=1e-4,  # 学习率
