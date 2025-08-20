@@ -106,12 +106,28 @@ class HierarchicalRL:
         low_level_action_dim = self.env.action_space.shape[0]  # 低层动作维度
 
         # 使用普通经验回放缓冲区
+        # 为高层和低层智能体创建观察空间和动作空间
+        from gym.spaces import Box, Discrete
+        import numpy as np
+
+        # 高层智能体的观察空间和动作空间
+        high_level_observation_space = Box(low=-np.inf, high=np.inf, shape=(high_level_state_dim,), dtype=np.float32)
+        high_level_action_space = Discrete(high_level_action_dim)
+
+        # 低层智能体的观察空间和动作空间
+        low_level_observation_space = Box(low=-np.inf, high=np.inf, shape=(low_level_state_dim,), dtype=np.float32)
+        low_level_action_space = self.env.action_space  # 直接使用环境的动作空间
+
         self.high_level_buffer = ReplayBuffer(  # 高层（DQN）的经验回放缓冲区
             buffer_size=1_000_000,
+            observation_space=high_level_observation_space,
+            action_space=high_level_action_space,
             device=self.device
         )
         self.low_level_buffer = ReplayBuffer(  # 低层（TD3）的经验回放缓冲区
             buffer_size=1_000_000,
+            observation_space=low_level_observation_space,
+            action_space=low_level_action_space,
             device=self.device
         )
         print("使用普通经验回放缓冲区")
