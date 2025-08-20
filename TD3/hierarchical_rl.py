@@ -163,6 +163,7 @@ class HierarchicalRL:
         """
         print("正在初始化高层DQN智能体...")
         # 为高层DQN创建一个具有离散动作空间的环境
+        import gymnasium
         from gymnasium import spaces
         from stable_baselines3.common.env_util import make_vec_env
         
