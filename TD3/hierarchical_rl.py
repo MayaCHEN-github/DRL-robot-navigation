@@ -9,19 +9,8 @@ from stable_baselines3.common.callbacks import CheckpointCallback  # 从sb3导�
 # 从sb3导入的经验回放缓冲区
 from stable_baselines3.common.buffers import ReplayBuffer
 
-# 尝试导入PrioritizedReplayBuffer
-PRIORITIZED_REPLAY_AVAILABLE = True
-try:
-    from stable_baselines3.common.prioritized_buffer import PrioritizedReplayBuffer
-    print("成功从stable_baselines3.common.prioritized_buffer导入PrioritizedReplayBuffer")
-except ImportError:
-    try:
-        from stable_baselines3.common.buffers import PrioritizedReplayBuffer
-        print("成功从stable_baselines3.common.buffers导入PrioritizedReplayBuffer")
-    except ImportError:
-        print("警告: 无法导入PrioritizedReplayBuffer。请确保安装了正确版本的Stable Baselines3。")
-        print("如需使用优先经验回放，建议安装SB3的prioritized_replay扩展或降级到支持此功能的SB3版本。")
-        PRIORITIZED_REPLAY_AVAILABLE = False
+# 移除了PrioritizedReplayBuffer的导入，因为该类不可用
+PRIORITIZED_REPLAY_AVAILABLE = False
 from gym_wrapper import VelodyneGymWrapper  # 自定义的Gym环境包装器
 from velodyne_env import GazeboEnv  # 自定义的Gazebo环境
 from typing import Dict, Any, Tuple, List, Optional  # 类型注解
@@ -42,9 +31,10 @@ class HierarchicalRL:
 
     """
     def __init__(self, environment_dim=20, max_timesteps=5e6, eval_freq=5e3, device=None, batch_train_size=100,
-                 use_per=True, per_alpha=0.6, per_beta=0.4, per_beta_increment=1e-4,
                  epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=1e5,
                  noise_start=0.2, noise_end=0.01, noise_decay=1e5):
+        # 移除了与PrioritizedReplayBuffer相关的参数，因为该类不可用
+        use_per = False
         """初始化HRL Agent"""
         # CUDA使用设置
         self.device = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -58,10 +48,7 @@ class HierarchicalRL:
         self.batch_train_size = batch_train_size  # 批量训练大小，默认100
 
         # 经验回放参数
-        self.use_per = use_per  # 是否使用优先经验回放(PER)，默认True
-        self.per_alpha = per_alpha  # 优先级权重，控制经验的重要性程度，默认0.6
-        self.per_beta = per_beta  # 重要性采样权重，减少高优先级经验的过度采样，默认0.4
-        self.per_beta_increment = per_beta_increment  # beta随时间增加量，逐渐增加重要性采样的影响，默认1e-4
+        self.use_per = False  # 已禁用优先经验回放(PER)，因为PrioritizedReplayBuffer不可用
 
         # 探索策略参数
         self.epsilon_start = epsilon_start  # DQN初始探索率，默认1.0
@@ -108,9 +95,7 @@ class HierarchicalRL:
         """初始化经验回放缓冲区
 
         经验回放缓冲区用于存储智能体与环境交互产生的经验，以便后续训练使用。
-        该方法为高层和低层智能体分别创建经验回放缓冲区，支持普通经验回放和
-        优先经验回放(PER)两种方式。优先经验回放能够根据经验的重要性进行采样，
-        提高学习效率。
+        该方法为高层和低层智能体分别创建普通经验回放缓冲区。
 
         """
         print("正在初始化经验回放缓冲区...")
@@ -120,37 +105,16 @@ class HierarchicalRL:
         low_level_state_dim = high_level_state_dim + 2  # 低层状态维度=高层状态+方向+距离
         low_level_action_dim = self.env.action_space.shape[0]  # 低层动作维度
 
-        # 检查是否同时满足使用PER的条件和PER可用
-        if self.use_per and PRIORITIZED_REPLAY_AVAILABLE: # 使用优先经验回放(PER)缓冲区
-            self.high_level_buffer = PrioritizedReplayBuffer(  # 高层（DQN）的经验回放缓冲区
-                buffer_size=1_000_000,  # 缓冲区大小
-                alpha=self.per_alpha,  # 优先级权重
-                beta=self.per_beta,  # 重要性采样权重
-                device=self.device  
-            )
-            self.low_level_buffer = PrioritizedReplayBuffer(  # 低层（TD3）的经验回放缓冲区
-                buffer_size=1_000_000,
-                alpha=self.per_alpha,
-                beta=self.per_beta,
-                device=self.device
-            )
-            print("使用优先经验回放(PER)缓冲区")
-        elif self.use_per and not PRIORITIZED_REPLAY_AVAILABLE:
-            # PER不可用，但用户要求使用PER
-            print("警告: 优先经验回放(PER)不可用，将回退到普通经验回放缓冲区")
-            print("如需使用PER功能，请确保安装了正确版本的Stable Baselines3或其扩展")
-            # 使用普通经验回放缓冲区
-        else:
-            # 使用普通经验回放缓冲区。也是从stable_baselines3中导入的
-            self.high_level_buffer = ReplayBuffer(  # 高层（DQN）的经验回放缓冲区
-                buffer_size=1_000_000,
-                device=self.device
-            )
-            self.low_level_buffer = ReplayBuffer(  # 低层（TD3）的经验回放缓冲区
-                buffer_size=1_000_000,
-                device=self.device
-            )
-            print("使用普通经验回放缓冲区")
+        # 使用普通经验回放缓冲区
+        self.high_level_buffer = ReplayBuffer(  # 高层（DQN）的经验回放缓冲区
+            buffer_size=1_000_000,
+            device=self.device
+        )
+        self.low_level_buffer = ReplayBuffer(  # 低层（TD3）的经验回放缓冲区
+            buffer_size=1_000_000,
+            device=self.device
+        )
+        print("使用普通经验回放缓冲区")
 
     def _init_high_level_agent(self):
         """初始化高层智能体
@@ -186,7 +150,9 @@ class HierarchicalRL:
             def step(self, action):
                 # 这里不需要实际执行动作，因为高层动作会被解码后传递给低层智能体
                 # 我们只需要返回一个dummy结果以满足SB3的接口要求
-                state = self.env.reset()[0]
+                # 处理可能的元组返回值
+                reset_result = self.env.reset()
+                state = reset_result[0] if isinstance(reset_result, tuple) else reset_result
                 return state, 0.0, False, False, {}
             
             def render(self, mode='human'):
@@ -452,56 +418,27 @@ class HierarchicalRL:
                 )
 
                 # 存储经验到缓冲区
-                if self.use_per:
-                    # PER缓冲区需要优先级，这里简化使用 reward 的绝对值作为初始优先级
-                    high_level_priority = abs(high_level_reward)
-                    low_level_priority = abs(low_level_reward)
+                self.high_level_buffer.add(
+                    state=state.reshape(1, -1),
+                    action=high_level_action,
+                    reward=high_level_reward,
+                    next_state=next_state.reshape(1, -1),
+                    done=done
+                )
 
-                    self.high_level_buffer.add(
-                        state=state.reshape(1, -1),
-                        action=high_level_action,
-                        reward=high_level_reward,
-                        next_state=next_state.reshape(1, -1),
-                        done=done,
-                        priority=high_level_priority
-                    )
-
-                    self.low_level_buffer.add(
-                        state=sub_goal_state.reshape(1, -1),
-                        action=low_level_action,
-                        reward=low_level_reward,
-                        next_state=np.append(next_state, [direction, distance]).reshape(1, -1),
-                        done=done,
-                        priority=low_level_priority
-                    )
-                else:
-                    self.high_level_buffer.add(
-                        state=state.reshape(1, -1),
-                        action=high_level_action,
-                        reward=high_level_reward,
-                        next_state=next_state.reshape(1, -1),
-                        done=done
-                    )
-
-                    self.low_level_buffer.add(
-                        state=sub_goal_state.reshape(1, -1),
-                        action=low_level_action,
-                        reward=low_level_reward,
-                        next_state=np.append(next_state, [direction, distance]).reshape(1, -1),
-                        done=done
-                    )
+                self.low_level_buffer.add(
+                    state=sub_goal_state.reshape(1, -1),
+                    action=low_level_action,
+                    reward=low_level_reward,
+                    next_state=np.append(next_state, [direction, distance]).reshape(1, -1),
+                    done=done
+                )
 
                 # 当经验积累到一定数量时进行批量训练
                 if self.high_level_buffer.size() >= self.batch_train_size and self.low_level_buffer.size() >= self.batch_train_size:
                     print(f"进行批量训练 - 高层经验: {self.high_level_buffer.size()}, 低层经验: {self.low_level_buffer.size()}")
 
-                    # 更新PER的beta参数
-                    if self.use_per:
-                        self.high_level_buffer.beta = min(1.0, self.high_level_buffer.beta + self.per_beta_increment)
-                        self.low_level_buffer.beta = min(1.0, self.low_level_buffer.beta + self.per_beta_increment)
-                        # 记录beta参数更新
-                        if timestep % (self.eval_freq // 2) == 0:
-                            print(f"PER beta更新 - 高层: {self.high_level_buffer.beta:.3f}, 低层: {self.low_level_buffer.beta:.3f}")
+                    # 由于已禁用PER，此处省略beta参数更新
 
                     # 训练高层DQN
                     self.high_level_agent.learn(total_timesteps=self.batch_train_size, reset_num_timesteps=False)
@@ -564,9 +501,6 @@ class HierarchicalRL:
         low_level_lr = trial.suggest_float("low_level_lr", 1e-5, 1e-3, log=True)
         gamma_high = trial.suggest_float("gamma_high", 0.9, 0.999)
         gamma_low = trial.suggest_float("gamma_low", 0.99, 0.99999)
-        use_per = trial.suggest_categorical("use_per", [True, False])
-        per_alpha = trial.suggest_float("per_alpha", 0.4, 0.8) if use_per else 0.6
-        per_beta = trial.suggest_float("per_beta", 0.3, 0.6) if use_per else 0.4
         epsilon_decay = trial.suggest_int("epsilon_decay", 5e4, 2e5)
         noise_decay = trial.suggest_int("noise_decay", 5e4, 2e5)
 
@@ -576,9 +510,6 @@ class HierarchicalRL:
             max_timesteps=max_timesteps,
             eval_freq=eval_freq,
             batch_train_size=batch_train_size,
-            use_per=use_per,
-            per_alpha=per_alpha,
-            per_beta=per_beta,
             epsilon_decay=epsilon_decay,
             noise_decay=noise_decay
         )
