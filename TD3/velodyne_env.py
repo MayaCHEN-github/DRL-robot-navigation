@@ -125,7 +125,8 @@ class GazeboEnv:
         if not path.exists(fullpath):
             raise IOError("File " + fullpath + " does not exist")
         # 启动Gazebo仿真
-        subprocess.Popen(["roslaunch", "-p", port, fullpath])
+        # 启动Gazebo仿真，添加--gui=false参数禁用图形界面
+        subprocess.Popen(["roslaunch", "-p", port, fullpath, "--gui=false"])
         print("Gazebo launched!")
 
         # Set up the ROS publishers and subscribers

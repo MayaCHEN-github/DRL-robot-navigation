@@ -7,7 +7,7 @@ from gym_wrapper import VelodyneGymWrapper
 
 
 class EvaluationCallback(BaseCallback):
-    """评估回调：每5000步打印一次提示"""
+    """评估回调: 每5000步打印一次提示"""
 
     def __init__(self, eval_freq: int = 5000, verbose: int = 1):
         super().__init__(verbose)
@@ -23,17 +23,14 @@ class EvaluationCallback(BaseCallback):
 
 
 def main():
-    # 设备信息
+    # 检查cuda是否可用
     print("=== CUDA检测 ===")
     print(f"PyTorch版本: {torch.__version__}")
-    print(f"CUDA可用: {torch.cuda.is_available()}")
     if torch.cuda.is_available():
-        print(f"CUDA设备数量: {torch.cuda.device_count()}")
-        print(f"当前CUDA设备: {torch.cuda.current_device()}")
-        print(f"CUDA设备名称: {torch.cuda.get_device_name(0)}")
+        print(f"CUDA可用: {torch.cuda.is_available()}")
         device = "cuda"
     else:
-        print("⚠️  CUDA不可用，将使用CPU")
+        print("⚠️  CUDA不可用, 将使用CPU")
         device = "cpu"
     print("=" * 20)
 

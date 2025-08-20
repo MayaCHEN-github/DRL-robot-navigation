@@ -92,7 +92,7 @@ def main():
     callbacks = [checkpoint_callback, eval_callback]
     
     # 快速验证
-    print("=== 第一阶段：快速验证（5000步）===")
+    print("=== 第一阶段: 快速验证(5000步)===")
     model.learn(
         total_timesteps=5_000,   # 5000步，对齐checkpoint/eval频率
         progress_bar=True,
@@ -103,7 +103,7 @@ def main():
     # 正式训练
     user_input = input("程序运行正常！是否继续训练更多步数？(y/n): ")
     if user_input.lower() == 'y':
-        print("=== 第二阶段：正式训练（245000步，延续同一模型与时间轴）===")
+        print("=== 第二阶段: 正式训练(245000步, 延续同一模型与时间轴)===")  
         model.learn(
             total_timesteps=245_000,  # 与第一阶段合计约25万步，≈50个checkpoint
             progress_bar=True,
@@ -116,7 +116,7 @@ def main():
 
     # 保存模型
     print("正在保存模型...")
-    model.save("dqn_test_model")
+    model.save("dqn_sb3_model")
 
     env.close()
     print("训练完成！")

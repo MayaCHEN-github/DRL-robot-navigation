@@ -8,7 +8,7 @@ from velodyne_env import GazeboEnv
 class VelodyneGymWrapper(gym.Env):
     """
     将VelodyneEnv包装成Gym环境, 方便使用Gym的API。
-    支持CUDA检测，但返回numpy数组以确保与stable-baselines3兼容。
+    支持CUDA检测, 但返回numpy数组以确保与stable-baselines3兼容。
     """
     def __init__(self, launchfile, environment_dim, action_type="continuous", device=None):
         super().__init__()
