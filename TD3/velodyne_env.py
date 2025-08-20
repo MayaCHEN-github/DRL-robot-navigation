@@ -128,8 +128,7 @@ class GazeboEnv:
         # 启动Gazebo仿真，添加--gui=false参数禁用图形界面
         # 启动Gazebo仿真，添加--gui=false参数禁用图形界面
         # 注意：--gui参数需要放在launch文件路径之前
-        subprocess.Popen(["roslaunch", "-p", port, "--gui=false", fullpath])
-        print("Gazebo launched with GUI disabled!")
+        subprocess.Popen(["roslaunch", "-p", port, fullpath])
 
         # Set up the ROS publishers and subscribers
         # 创建ROS发布者（Publisher）
