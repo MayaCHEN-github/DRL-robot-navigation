@@ -172,23 +172,24 @@ class HierarchicalRL:
         high_level_action_space = spaces.Discrete(num_directions * num_distances)
         
         # 创建一个环境包装器，使用离散动作空间
-        class DiscreteActionEnvWrapper:
+        class DiscreteActionEnvWrapper(gymnasium.Env):
             def __init__(self, env):
+                super().__init__()
                 self.env = env
                 self.observation_space = env.observation_space
                 self.action_space = high_level_action_space
                 
-            def reset(self, *args, **kwargs):
-                return self.env.reset(*args, **kwargs)
+            def reset(self, seed=None, options=None):
+                return self.env.reset(seed=seed, options=options)
             
             def step(self, action):
                 # 这里不需要实际执行动作，因为高层动作会被解码后传递给低层智能体
-                # 我们只需要返回一个dummy结果
+                # 我们只需要返回一个dummy结果以满足SB3的接口要求
                 state = self.env.reset()[0]
                 return state, 0.0, False, False, {}
             
-            def render(self, *args, **kwargs):
-                return self.env.render(*args, **kwargs)
+            def render(self, mode='human'):
+                return self.env.render(mode=mode)
             
             def close(self):
                 return self.env.close()
