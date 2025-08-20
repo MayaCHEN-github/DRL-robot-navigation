@@ -6,7 +6,22 @@ import torch
 import optuna  # 用于超参数优化
 from stable_baselines3 import DQN, TD3  
 from stable_baselines3.common.callbacks import CheckpointCallback  # 从sb3导入的模型检查点callback
-from stable_baselines3.common.buffers import ReplayBuffer, PrioritizedReplayBuffer  # 从sb3导入的经验回放缓冲区
+# 从sb3导入的经验回放缓冲区
+from stable_baselines3.common.buffers import ReplayBuffer
+
+# 尝试导入PrioritizedReplayBuffer
+PRIORITIZED_REPLAY_AVAILABLE = True
+try:
+    from stable_baselines3.common.prioritized_buffer import PrioritizedReplayBuffer
+    print("成功从stable_baselines3.common.prioritized_buffer导入PrioritizedReplayBuffer")
+except ImportError:
+    try:
+        from stable_baselines3.common.buffers import PrioritizedReplayBuffer
+        print("成功从stable_baselines3.common.buffers导入PrioritizedReplayBuffer")
+    except ImportError:
+        print("警告: 无法导入PrioritizedReplayBuffer。请确保安装了正确版本的Stable Baselines3。")
+        print("如需使用优先经验回放，建议安装SB3的prioritized_replay扩展或降级到支持此功能的SB3版本。")
+        PRIORITIZED_REPLAY_AVAILABLE = False
 from gym_wrapper import VelodyneGymWrapper  # 自定义的Gym环境包装器
 from velodyne_env import GazeboEnv  # 自定义的Gazebo环境
 from typing import Dict, Any, Tuple, List, Optional  # 类型注解
@@ -105,7 +120,8 @@ class HierarchicalRL:
         low_level_state_dim = high_level_state_dim + 2  # 低层状态维度=高层状态+方向+距离
         low_level_action_dim = self.env.action_space.shape[0]  # 低层动作维度
 
-        if self.use_per: # 使用优先经验回放(PER)缓冲区。PrioritizedReplayBuffer是从stable_baselines3中导入的
+        # 检查是否同时满足使用PER的条件和PER可用
+        if self.use_per and PRIORITIZED_REPLAY_AVAILABLE: # 使用优先经验回放(PER)缓冲区
             self.high_level_buffer = PrioritizedReplayBuffer(  # 高层（DQN）的经验回放缓冲区
                 buffer_size=1_000_000,  # 缓冲区大小
                 alpha=self.per_alpha,  # 优先级权重
@@ -119,6 +135,11 @@ class HierarchicalRL:
                 device=self.device
             )
             print("使用优先经验回放(PER)缓冲区")
+        elif self.use_per and not PRIORITIZED_REPLAY_AVAILABLE:
+            # PER不可用，但用户要求使用PER
+            print("警告: 优先经验回放(PER)不可用，将回退到普通经验回放缓冲区")
+            print("如需使用PER功能，请确保安装了正确版本的Stable Baselines3或其扩展")
+            # 使用普通经验回放缓冲区
         else:
             # 使用普通经验回放缓冲区。也是从stable_baselines3中导入的
             self.high_level_buffer = ReplayBuffer(  # 高层（DQN）的经验回放缓冲区
