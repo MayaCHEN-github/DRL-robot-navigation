@@ -489,19 +489,19 @@ class HierarchicalRL:
 
                 # 存储经验到缓冲区
                 self.high_level_buffer.add(
-                    obs=state.reshape(1, -1),
-                    action=high_level_action,
-                    reward=high_level_reward,
-                    next_obs=next_state.reshape(1, -1),
-                    done=done
+                    state.reshape(1, -1),
+                    high_level_action,
+                    high_level_reward,
+                    done,
+                    next_state.reshape(1, -1)
                 )
 
                 self.low_level_buffer.add(
-                    obs=sub_goal_state.reshape(1, -1),
-                    action=low_level_action,
-                    reward=low_level_reward,
-                    next_obs=np.append(next_state, [direction, distance]).reshape(1, -1),
-                    done=done
+                    sub_goal_state.reshape(1, -1),
+                    low_level_action,
+                    low_level_reward,
+                    done,
+                    np.append(next_state, [direction, distance]).reshape(1, -1)
                 )
 
                 # 当经验积累到一定数量时进行批量训练
