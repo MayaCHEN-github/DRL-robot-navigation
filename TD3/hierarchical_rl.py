@@ -100,8 +100,12 @@ class HierarchicalRL:
         """
         print("正在初始化经验回放缓冲区...")
         # 获取状态和动作空间维度
-        high_level_state_dim = self.env.observation_space.shape[0]  # 高层状态维度
-        high_level_action_dim = self.environment_dim  # 高层动作数(方向数量)
+        # 获取状态和动作空间维度
+        # 高层状态维度与环境的观察空间维度相同
+        high_level_state_dim = self.env.observation_space.shape[0]
+        num_directions = self.environment_dim
+        num_distances = 10
+        high_level_action_dim = num_directions * num_distances  # 高层动作数(方向数量×距离级别)
         low_level_state_dim = high_level_state_dim + 2  # 低层状态维度=高层状态+方向+距离
         low_level_action_dim = self.env.action_space.shape[0]  # 低层动作维度
 
@@ -116,26 +120,25 @@ class HierarchicalRL:
         import numpy as np
 
         # 高层智能体的观察空间和动作空间
-        # 根据velodyne_env.py中的信息，激光雷达数据范围是0到10
-        high_level_observation_low = np.zeros(high_level_state_dim, dtype=np.float32)
-        high_level_observation_high = np.ones(high_level_state_dim, dtype=np.float32) * 10
-        # 对于机器人状态部分（如果有的话），设置合理范围
-        # 假设前20个是激光雷达数据，后4个是机器人状态
-        if high_level_state_dim > 20:
-            # 距离范围设为0到10
-            high_level_observation_high[20] = 10.0
-            # 角度范围设为-π到π
-            high_level_observation_low[21] = -np.pi
-            high_level_observation_high[21] = np.pi
-            # 动作范围设为-1到1
-            high_level_observation_low[22] = -1.0
-            high_level_observation_high[22] = 1.0
-            high_level_observation_low[23] = -1.0
-            high_level_observation_high[23] = 1.0
+        # 根据gym_wrapper.py中的定义设置观察空间
+        laser_low = 0.0
+        laser_high = 10.0
+        distance_low = 0.0
+        distance_high = 7.0
+        angle_low = -np.pi
+        angle_high = np.pi
+        vel_low = 0.0
+        vel_high = 1.0
+        ang_vel_low = -1.0
+        ang_vel_high = 1.0
+
+        high_level_observation_low = np.array([laser_low] * self.environment_dim + [distance_low, angle_low, vel_low, ang_vel_low], dtype=np.float32)
+        high_level_observation_high = np.array([laser_high] * self.environment_dim + [distance_high, angle_high, vel_high, ang_vel_high], dtype=np.float32)
 
         high_level_observation_space = Box(low=high_level_observation_low, high=high_level_observation_high, dtype=np.float32)
         high_level_action_space = Discrete(high_level_action_dim)
 
+        # 低层智能体的观察空间和动作空间
         # 低层智能体的观察空间和动作空间
         low_level_observation_low = np.concatenate([high_level_observation_low, [-np.pi, 0.0]]).astype(np.float32)
         low_level_observation_high = np.concatenate([high_level_observation_high, [np.pi, 10.0]]).astype(np.float32)
@@ -432,7 +435,9 @@ class HierarchicalRL:
 
         while timestep < self.max_timesteps:
             # 高层决策: 选择方向
-            state = self.env.reset()
+            # 正确处理reset方法的返回值
+            reset_result = self.env.reset()
+            state = reset_result[0] if isinstance(reset_result, tuple) else reset_result
             done = False
             episode_reward = 0
             episode_timesteps = 0
