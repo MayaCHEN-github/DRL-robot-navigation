@@ -523,83 +523,102 @@ class HierarchicalRL:
                 print(f"Before high_level_buffer.add(): done type: {type(done)}, shape: {np.shape(done) if hasattr(done, 'shape') else 'N/A'}, value: {done}")
                 # 确保done是标量并转换为形状为(1,)的数组
                 done_scalar = bool(done)
-                done_array = np.array([done_scalar], dtype=np.bool_).reshape(1,)
+                done_array = np.array([done_scalar], dtype=np.bool_)
                 print(f"Final done array shape: {done_array.shape}, value: {done_array}")
-                # 检查缓冲区dones的形状并相应调整done数组
+                
+                # 直接使用形状为(1,)的done数组
                 try:
-                    # 获取缓冲区dones的形状
-                    buffer_dones_shape = self.high_level_buffer.dones.shape
-                    print(f"Buffer dones shape: {buffer_dones_shape}")
-                    
-                    # 根据缓冲区形状调整done数组
-                    if len(buffer_dones_shape) > 1 and buffer_dones_shape[1] > 1:
-                        # 如果缓冲区期望的是多维度数组，将done扩展到相应形状
-                        done_reshaped = np.tile(done_array, (1, buffer_dones_shape[1]))
-                        print(f"Tiled done array shape: {done_reshaped.shape}")
-                    else:
-                        # 否则保持形状为(1,)
-                        done_reshaped = done_array.reshape((1,))
-                        print(f"Reshaped done array shape: {done_reshaped.shape}")
-                    
                     self.high_level_buffer.add(
                         state.reshape(1, -1),
                         high_level_action,
                         high_level_reward,
-                        done_reshaped,
+                        done_array,
                         next_state.reshape(1, -1),
                         infos=[{}]
                     )
                 except Exception as e:
                     print(f"Error adding to high_level_buffer: {e}")
-                    # 如果出现错误，尝试使用最基本的形状
-                    self.high_level_buffer.add(
-                        state.reshape(1, -1),
-                        high_level_action,
-                        high_level_reward,
-                        np.array([done_scalar]),
-                        next_state.reshape(1, -1),
-                        infos=[{}]
-                    )
+                    print(f"Buffer dones shape: {self.high_level_buffer.dones.shape}")
+                    print(f"Current done array shape: {done_array.shape}")
+                    
+                    # 尝试将done数组扩展为与缓冲区匹配的形状
+                    try:
+                        buffer_dones_shape = self.high_level_buffer.dones.shape
+                        if len(buffer_dones_shape) > 1:
+                            target_shape = buffer_dones_shape[1]
+                            done_reshaped = np.array([done_scalar] * target_shape, dtype=np.bool_)
+                            print(f"Reshaped done array to shape: {done_reshaped.shape}")
+                            self.high_level_buffer.add(
+                                state.reshape(1, -1),
+                                high_level_action,
+                                high_level_reward,
+                                done_reshaped,
+                                next_state.reshape(1, -1),
+                                infos=[{}]
+                            )
+                        else:
+                            raise
+                    except Exception as e2:
+                        print(f"Error after reshaping: {e2}")
+                        # 最后的 fallback: 使用标量
+                        self.high_level_buffer.add(
+                                state.reshape(1, -1),
+                                high_level_action,
+                                high_level_reward,
+                                done_scalar,
+                                next_state.reshape(1, -1),
+                                infos=[{}]
+                            )
 
                 print(f"Before low_level_buffer.add(): done type: {type(done)}, shape: {np.shape(done) if hasattr(done, 'shape') else 'N/A'}, value: {done}")
                 # 对低层缓冲区使用相同的处理
                 done_scalar = bool(done)
-                done_array = np.array([done_scalar], dtype=np.bool_).reshape(1,)
-                # 对低层缓冲区使用相同的错误处理逻辑
+                done_array = np.array([done_scalar], dtype=np.bool_)
+                print(f"Low level final done array shape: {done_array.shape}, value: {done_array}")
+                
+                # 直接使用形状为(1,)的done数组
                 try:
-                    # 获取缓冲区dones的形状
-                    buffer_dones_shape = self.low_level_buffer.dones.shape
-                    print(f"Low level buffer dones shape: {buffer_dones_shape}")
-                    
-                    # 根据缓冲区形状调整done数组
-                    if len(buffer_dones_shape) > 1 and buffer_dones_shape[1] > 1:
-                        # 如果缓冲区期望的是多维度数组，将done扩展到相应形状
-                        done_reshaped = np.tile(done_array, (1, buffer_dones_shape[1]))
-                        print(f"Low level tiled done array shape: {done_reshaped.shape}")
-                    else:
-                        # 否则保持形状为(1,)
-                        done_reshaped = done_array.reshape((1,))
-                        print(f"Low level reshaped done array shape: {done_reshaped.shape}")
-                    
                     self.low_level_buffer.add(
                         sub_goal_state.reshape(1, -1),
                         low_level_action,
                         low_level_reward,
-                        done_reshaped,
+                        done_array,
                         np.append(next_state, [direction, distance]).reshape(1, -1),
                         infos=[{}]
                     )
                 except Exception as e:
                     print(f"Error adding to low_level_buffer: {e}")
-                    # 如果出现错误，尝试使用最基本的形状
-                    self.low_level_buffer.add(
-                        sub_goal_state.reshape(1, -1),
-                        low_level_action,
-                        low_level_reward,
-                        np.array([done_scalar]),
-                        np.append(next_state, [direction, distance]).reshape(1, -1),
-                        infos=[{}]
-                    )
+                    print(f"Low level buffer dones shape: {self.low_level_buffer.dones.shape}")
+                    print(f"Current done array shape: {done_array.shape}")
+                    
+                    # 尝试将done数组扩展为与缓冲区匹配的形状
+                    try:
+                        buffer_dones_shape = self.low_level_buffer.dones.shape
+                        if len(buffer_dones_shape) > 1:
+                            target_shape = buffer_dones_shape[1]
+                            done_reshaped = np.array([done_scalar] * target_shape, dtype=np.bool_)
+                            print(f"Low level reshaped done array to shape: {done_reshaped.shape}")
+                            self.low_level_buffer.add(
+                                sub_goal_state.reshape(1, -1),
+                                low_level_action,
+                                low_level_reward,
+                                done_reshaped,
+                                np.append(next_state, [direction, distance]).reshape(1, -1),
+                                infos=[{}]
+                            )
+                        else:
+                            raise
+                    except Exception as e2:
+                        print(f"Error after low level reshaping: {e2}")
+                        # 最后的 fallback: 使用标量
+                        self.low_level_buffer.add(
+                            sub_goal_state.reshape(1, -1),
+                            low_level_action,
+                            low_level_reward,
+                            done_scalar,
+                            np.append(next_state, [direction, distance]).reshape(1, -1),
+                            infos=[{}]
+                        )
 
                 # 当经验积累到一定数量时进行批量训练
                 if self.high_level_buffer.size() >= self.batch_train_size and self.low_level_buffer.size() >= self.batch_train_size:
