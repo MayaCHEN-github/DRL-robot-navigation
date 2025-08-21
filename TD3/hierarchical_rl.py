@@ -521,21 +521,28 @@ class HierarchicalRL:
 
                 # 存储经验到缓冲区前再次检查done
                 print(f"Before high_level_buffer.add(): done type: {type(done)}, shape: {np.shape(done) if hasattr(done, 'shape') else 'N/A'}, value: {done}")
+                # 确保done是标量并转换为形状为(1,)的数组
+                done_scalar = bool(done)
+                done_array = np.array([done_scalar], dtype=np.bool_).reshape(1,)
+                print(f"Final done array shape: {done_array.shape}, value: {done_array}")
                 self.high_level_buffer.add(
                     state.reshape(1, -1),
                     high_level_action,
                     high_level_reward,
-                    np.array([done]),  # 显式转换为形状为(1,)的数组
+                    done_array,
                     next_state.reshape(1, -1),
                     infos=[{}]
                 )
 
                 print(f"Before low_level_buffer.add(): done type: {type(done)}, shape: {np.shape(done) if hasattr(done, 'shape') else 'N/A'}, value: {done}")
+                # 对低层缓冲区使用相同的处理
+                done_scalar = bool(done)
+                done_array = np.array([done_scalar], dtype=np.bool_).reshape(1,)
                 self.low_level_buffer.add(
                     sub_goal_state.reshape(1, -1),
                     low_level_action,
                     low_level_reward,
-                    np.array([done]),  # 显式转换为形状为(1,)的数组
+                    done_array,
                     np.append(next_state, [direction, distance]).reshape(1, -1),
                     infos=[{}]
                 )
