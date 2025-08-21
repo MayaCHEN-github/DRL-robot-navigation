@@ -236,9 +236,23 @@ class HierarchicalRL:
         """
         print("正在初始化低层TD3智能体...")
         # 低层TD3处理连续动作
+        # 创建一个新的观察空间，包含原始状态(24维)加上方向和距离(2维)
+        from gym.spaces import Box
+        low = np.append(self.env.observation_space.low, [-np.pi, 0.0])  # 方向范围[-pi, pi]，距离范围[0.0, 5.0]
+        high = np.append(self.env.observation_space.high, [np.pi, 5.0])
+        extended_observation_space = Box(low=low, high=high, dtype=np.float32)
+
+        # 使用扩展后的观察空间创建一个包装环境
+        class ExtendedObservationEnvWrapper(gym.Wrapper):
+            def __init__(self, env):
+                super().__init__(env)
+                self.observation_space = extended_observation_space
+
+        extended_env = ExtendedObservationEnvWrapper(self.env)
+
         model = TD3(
             "MlpPolicy", 
-            self.env,  
+            extended_env,  
             verbose=0, 
             tensorboard_log="./logs/low_level_td3",  # 日志保存路径
             learning_rate=1e-4,  # 学习率
