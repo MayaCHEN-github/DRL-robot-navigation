@@ -115,6 +115,7 @@ class HierarchicalRL:
             from gymnasium.spaces import Box, Discrete
             gym_lib = 'gymnasium'
         except ImportError:
+            import gym
             from gym.spaces import Box, Discrete
             gym_lib = 'gym'
         import numpy as np
@@ -237,7 +238,6 @@ class HierarchicalRL:
         print("正在初始化低层TD3智能体...")
         # 低层TD3处理连续动作
         # 创建一个新的观察空间，包含原始状态(24维)加上方向和距离(2维)
-        from gym.spaces import Box
         low = np.append(self.env.observation_space.low, [-np.pi, 0.0])  # 方向范围[-pi, pi]，距离范围[0.0, 5.0]
         high = np.append(self.env.observation_space.high, [np.pi, 5.0])
         extended_observation_space = Box(low=low, high=high, dtype=np.float32)
