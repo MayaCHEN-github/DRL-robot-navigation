@@ -479,7 +479,8 @@ class HierarchicalRL:
 
                 # 执行动作
                 next_state, reward, terminated, truncated, info = self.env.step(low_level_action)
-                done = bool(terminated or truncated)
+                # 确保done是标量布尔值，即使terminated或truncated是数组
+                done = bool(np.any(terminated) or np.any(truncated))
                 target = info.get('target_reached', False)
 
                 # 计算奖励
