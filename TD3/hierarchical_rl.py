@@ -489,18 +489,18 @@ class HierarchicalRL:
 
                 # 存储经验到缓冲区
                 self.high_level_buffer.add(
-                    state=state.reshape(1, -1),
+                    obs=state.reshape(1, -1),
                     action=high_level_action,
                     reward=high_level_reward,
-                    next_state=next_state.reshape(1, -1),
+                    next_obs=next_state.reshape(1, -1),
                     done=done
                 )
 
                 self.low_level_buffer.add(
-                    state=sub_goal_state.reshape(1, -1),
+                    obs=sub_goal_state.reshape(1, -1),
                     action=low_level_action,
                     reward=low_level_reward,
-                    next_state=np.append(next_state, [direction, distance]).reshape(1, -1),
+                    next_obs=np.append(next_state, [direction, distance]).reshape(1, -1),
                     done=done
                 )
 
