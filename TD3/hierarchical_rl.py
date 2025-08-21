@@ -350,7 +350,7 @@ class HierarchicalRL:
             self.low_level_agent.policy.target_policy_noise = self.current_noise # 更新为current_noise
 
     def _calculate_rewards(self, state: np.ndarray, next_state: np.ndarray, action: int, distance: float,
-                          done: bool, target: bool, episode_timesteps: int, reward: float) -> Tuple[float, float]:
+                          done: bool, target: bool, episode_timesteps: int, reward: float, info: dict) -> Tuple[float, float]:
         # 确保prev_direction已定义
         if not hasattr(self, 'prev_direction'):
             self.prev_direction = 0.0
@@ -365,10 +365,9 @@ class HierarchicalRL:
             next_state: 下一个状态
             action: 高层智能体选择的动作
             distance: 高层智能体选择的距离
-            terminated: 是否因完成任务或碰撞而终止
-            truncated: 是否因超时而终止
+            done: 是否结束回合
+            target: 是否到达目标
             episode_timesteps: 当前回合步数
-            info: 环境反馈信息
             reward: 环境原始奖励
 
         返回:
@@ -401,9 +400,8 @@ class HierarchicalRL:
         # 新增: 子目标合理性奖励
         # 检查目标方向是否有障碍物
         obstacle_avoidance_reward = 0.0
-        # 暂时注释掉使用info的部分，因为没有info参数
-        # if 'obstacle_ahead' in info and not info['obstacle_ahead']:
-        #     obstacle_avoidance_reward = 0.2
+        # 检查目标方向是否有障碍物
+        obstacle_avoidance_reward = 0.2 if 'obstacle_ahead' in info and not info['obstacle_ahead'] else 0.0
 
         # 新增: 路径质量奖励 (平滑性)
         if episode_timesteps > 0 and hasattr(self, 'prev_direction'):
@@ -480,12 +478,14 @@ class HierarchicalRL:
                 low_level_action = self.low_level_agent.predict(sub_goal_state, deterministic=False)[0]
 
                 # 执行动作
-                next_state, reward, done, target = self.env.step(low_level_action)
+                next_state, reward, terminated, truncated, info = self.env.step(low_level_action)
+                done = terminated or truncated
+                target = info.get('target_reached', False)
 
                 # 计算奖励
                 high_level_reward, low_level_reward = self._calculate_rewards(
-                    state, next_state, high_level_action, distance, done, target, episode_timesteps, reward
-                )
+                        state, next_state, high_level_action, distance, done, target, episode_timesteps, reward, info
+                    )
 
                 # 存储经验到缓冲区
                 self.high_level_buffer.add(
