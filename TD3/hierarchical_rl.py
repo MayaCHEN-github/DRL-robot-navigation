@@ -155,13 +155,15 @@ class HierarchicalRL:
             buffer_size=1_000_000,
             observation_space=high_level_observation_space,
             action_space=high_level_action_space,
-            device=self.device
+            device=self.device,
+            n_envs=1  # 明确指定环境数量为1
         )
         self.low_level_buffer = ReplayBuffer(  # 低层（TD3）的经验回放缓冲区
             buffer_size=1_000_000,
             observation_space=low_level_observation_space,
             action_space=low_level_action_space,
-            device=self.device
+            device=self.device,
+            n_envs=1  # 明确指定环境数量为1
         )
         print("使用普通经验回放缓冲区")
 
@@ -480,13 +482,36 @@ class HierarchicalRL:
                 # 执行动作
                 next_state, reward, terminated, truncated, info = self.env.step(low_level_action)
 
-                # 确保terminated和truncated是标量
+                # 添加调试信息
+                print(f"terminated type: {type(terminated)}, shape: {np.shape(terminated) if hasattr(terminated, 'shape') else 'N/A'}")
+                print(f"truncated type: {type(truncated)}, shape: {np.shape(truncated) if hasattr(truncated, 'shape') else 'N/A'}")
+                
+                # 确保terminated和truncated是标量布尔值
+                # 如果是数组，使用np.any()检查是否有True值
                 if isinstance(terminated, np.ndarray):
-                    terminated = terminated.item()
+                    # 强制转换为标量布尔值
+                    terminated = bool(np.any(terminated))
+                    print(f"Converted terminated array to scalar: {terminated}")
+                else:
+                    terminated = bool(terminated)
+                    print(f"Converted terminated to bool: {terminated}")
+                
                 if isinstance(truncated, np.ndarray):
-                    truncated = truncated.item()
-
+                    # 强制转换为标量布尔值
+                    truncated = bool(np.any(truncated))
+                    print(f"Converted truncated array to scalar: {truncated}")
+                else:
+                    truncated = bool(truncated)
+                    print(f"Converted truncated to bool: {truncated}")
+                
                 done = terminated or truncated
+                print(f"done type: {type(done)}, value: {done}")
+                
+                # 最后的安全检查 - 确保done是标量布尔值
+                if not isinstance(done, bool):
+                    print("WARNING: done is not a boolean! Forcing conversion.")
+                    done = bool(done)
+                    print(f"After final conversion: done type: {type(done)}, value: {done}")
                 target = info.get('target_reached', False)
 
                 # 计算奖励
@@ -494,21 +519,23 @@ class HierarchicalRL:
                         state, next_state, high_level_action, distance, done, target, episode_timesteps, reward, info
                     )
 
-                # 存储经验到缓冲区
+                # 存储经验到缓冲区前再次检查done
+                print(f"Before high_level_buffer.add(): done type: {type(done)}, shape: {np.shape(done) if hasattr(done, 'shape') else 'N/A'}, value: {done}")
                 self.high_level_buffer.add(
                     state.reshape(1, -1),
                     high_level_action,
                     high_level_reward,
-                    done,
+                    np.array([done]),  # 显式转换为形状为(1,)的数组
                     next_state.reshape(1, -1),
                     infos=[{}]
                 )
 
+                print(f"Before low_level_buffer.add(): done type: {type(done)}, shape: {np.shape(done) if hasattr(done, 'shape') else 'N/A'}, value: {done}")
                 self.low_level_buffer.add(
                     sub_goal_state.reshape(1, -1),
                     low_level_action,
                     low_level_reward,
-                    done,
+                    np.array([done]),  # 显式转换为形状为(1,)的数组
                     np.append(next_state, [direction, distance]).reshape(1, -1),
                     infos=[{}]
                 )
