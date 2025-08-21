@@ -350,7 +350,7 @@ class HierarchicalRL:
             self.low_level_agent.policy.target_policy_noise = self.current_noise # 更新为current_noise
 
     def _calculate_rewards(self, state: np.ndarray, next_state: np.ndarray, action: int, distance: float,
-                          terminated: bool, truncated: bool, episode_timesteps: int, info: Dict, reward: float) -> Tuple[float, float]:
+                          done: bool, target: bool, episode_timesteps: int, reward: float) -> Tuple[float, float]:
         # 确保prev_direction已定义
         if not hasattr(self, 'prev_direction'):
             self.prev_direction = 0.0
@@ -395,14 +395,15 @@ class HierarchicalRL:
         # 高层奖励组成
         direction_reward = 1.0 - (direction_diff / 180.0)
         distance_reward = 1.0 - min(distance_diff / distance, 1.0)
-        collision_penalty = -1.0 if terminated else 0.0
+        collision_penalty = -1.0 if done and not target else 0.0
         time_penalty = -0.01
 
         # 新增: 子目标合理性奖励
-        # 检查目标方向是否有障碍物 (假设info中包含障碍物信息)
+        # 检查目标方向是否有障碍物
         obstacle_avoidance_reward = 0.0
-        if 'obstacle_ahead' in info and not info['obstacle_ahead']:
-            obstacle_avoidance_reward = 0.2
+        # 暂时注释掉使用info的部分，因为没有info参数
+        # if 'obstacle_ahead' in info and not info['obstacle_ahead']:
+        #     obstacle_avoidance_reward = 0.2
 
         # 新增: 路径质量奖励 (平滑性)
         if episode_timesteps > 0 and hasattr(self, 'prev_direction'):
@@ -479,12 +480,11 @@ class HierarchicalRL:
                 low_level_action = self.low_level_agent.predict(sub_goal_state, deterministic=False)[0]
 
                 # 执行动作
-                next_state, reward, terminated, truncated, info = self.env.step(low_level_action)
-                done = terminated or truncated
+                next_state, reward, done, target = self.env.step(low_level_action)
 
                 # 计算奖励
                 high_level_reward, low_level_reward = self._calculate_rewards(
-                    state, next_state, high_level_action, distance, terminated, truncated, episode_timesteps, info, reward
+                    state, next_state, high_level_action, distance, done, target, episode_timesteps, reward
                 )
 
                 # 存储经验到缓冲区
