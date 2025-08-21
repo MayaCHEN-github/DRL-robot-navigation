@@ -6,13 +6,14 @@ from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from gym_wrapper import VelodyneGymWrapper
 
 class EvaluationCallback(BaseCallback):
-    """评估回调，每5000步触发一次"""
+    """评估回调, 每5000步触发一次"""
     def __init__(self, eval_freq=5000, verbose=1):
         super().__init__(verbose)
         self.eval_freq = eval_freq
         self.last_eval = 0
         
     def _on_step(self) -> bool:
+        # 常规评估逻辑
         if self.num_timesteps - self.last_eval >= self.eval_freq:
             self.last_eval = self.num_timesteps
             if self.verbose > 0:
@@ -45,17 +46,23 @@ def main():
 
     # 创建DQN模型
     print("正在创建DQN模型...")
-    # 参数设置与train_dqn.py一致
+    # 训练节奏：每5000步评估/保存一次，目标总步数≈250k
     eval_freq = 5_000  # 每5000步评估一次
     model = DQN(
-        "MlpPolicy", 
-        env, 
-        verbose=1, 
+        "MlpPolicy",
+        env,
+        verbose=0,
         tensorboard_log="./logs/dqn_velodyne",
-        learning_rate=1e-3,
-        buffer_size=1_000_000,
-        batch_size=64,
-        gamma=0.999,  # 与train_dqn.py的discount保持一致
+        learning_rate=5e-4,  # 降低学习率以提高稳定性
+        buffer_size=200_000,
+        batch_size=128,  # 减小批次大小
+        gamma=0.99,
+        train_freq=4,
+        gradient_steps=4,
+        target_update_interval=2000,  # 增加目标网络更新频率
+        learning_starts=5000,  # 增加学习起始步数
+        exploration_fraction=0.7,  # 延长探索期
+        exploration_final_eps=0.05,  # 降低最终探索率
         device=device,  # 明确指定使用CUDA或CPU
     )
 
@@ -85,9 +92,9 @@ def main():
     callbacks = [checkpoint_callback, eval_callback]
     
     # 快速验证
-    print("=== 第一阶段：快速验证（1000步）===")
+    print("=== 第一阶段: 快速验证(5000步)===")
     model.learn(
-        total_timesteps=1_000,   # 1000步，快速验证程序运行
+        total_timesteps=5_000,   # 5000步，对齐checkpoint/eval频率
         progress_bar=True,
         callback=callbacks
     )
@@ -96,11 +103,12 @@ def main():
     # 正式训练
     user_input = input("程序运行正常！是否继续训练更多步数？(y/n): ")
     if user_input.lower() == 'y':
-        print("=== 第二阶段：正式训练（500万步）===")
+        print("=== 第二阶段: 正式训练(245000步, 延续同一模型与时间轴)===")  
         model.learn(
-            total_timesteps=5_000_000,
+            total_timesteps=245_000,  # 与第一阶段合计约25万步，≈50个checkpoint
             progress_bar=True,
-            callback=callbacks
+            callback=callbacks,
+            reset_num_timesteps=False  # 关键：不重置时间步，继续同一模型
         )
         print("✅ 训练完成！")
     else:
@@ -108,7 +116,7 @@ def main():
 
     # 保存模型
     print("正在保存模型...")
-    model.save("dqn_test_model")
+    model.save("dqn_sb3_model")
 
     env.close()
     print("训练完成！")

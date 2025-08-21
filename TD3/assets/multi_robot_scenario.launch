@@ -1,5 +1,5 @@
 <launch>
-<arg name="gui" value="false"/>
+<arg name="gui" default="false"/>
 
   <!-- 禁用在线模型库，强制用本地模型 -->
   <env name="GAZEBO_MODEL_DATABASE_URI" value=""/>
@@ -16,7 +16,7 @@
      <arg name="robot_position" value="-x 0.0 -y 0.0 -z 0.01 -R 0 -P 0 -Y +0.0" />
    </include>
 
-  <!-- RVIZ -->
-  <node pkg="rviz" type="rviz" name="rviz" args="-d $(find multi_robot_scenario)/launch/pioneer3dx.rviz" />
+  <!-- RVIZ（仅在 gui:=true 时启动） -->
+  <node if="$(arg gui)" pkg="rviz" type="rviz" name="rviz" args="-d $(find multi_robot_scenario)/launch/pioneer3dx.rviz" />
 
 </launch>
