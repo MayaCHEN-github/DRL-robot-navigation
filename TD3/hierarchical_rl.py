@@ -15,6 +15,15 @@ from gym_wrapper import VelodyneGymWrapper  # 自定义的Gym环境包装器
 from velodyne_env import GazeboEnv  # 自定义的Gazebo环境
 from typing import Dict, Any, Tuple, List, Optional  # 类型注解
 
+# 导入gym或gymnasium的空间类
+try:
+    from gymnasium.spaces import Box, Discrete
+    gym_lib = 'gymnasium'
+except ImportError:
+    import gym
+    from gym.spaces import Box, Discrete
+    gym_lib = 'gym'
+
 # Optuna配置
 OPTUNA_STUDY_NAME = "hierarchical_rl_study"  # 超参数优化研究的名称
 OPTUNA_N_TRIALS = 50  # 超参数搜索的试验次数，设置为50次以平衡搜索效率和效果
@@ -111,13 +120,6 @@ class HierarchicalRL:
 
         # 使用普通经验回放缓冲区
         # 为高层和低层智能体创建观察空间和动作空间
-        try:
-            from gymnasium.spaces import Box, Discrete
-            gym_lib = 'gymnasium'
-        except ImportError:
-            import gym
-            from gym.spaces import Box, Discrete
-            gym_lib = 'gym'
         import numpy as np
 
         # 高层智能体的观察空间和动作空间
