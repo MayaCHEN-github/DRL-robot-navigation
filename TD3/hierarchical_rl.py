@@ -493,7 +493,8 @@ class HierarchicalRL:
                     high_level_action,
                     high_level_reward,
                     done,
-                    next_state.reshape(1, -1)
+                    next_state.reshape(1, -1),
+                    infos=[{}]
                 )
 
                 self.low_level_buffer.add(
@@ -501,7 +502,8 @@ class HierarchicalRL:
                     low_level_action,
                     low_level_reward,
                     done,
-                    np.append(next_state, [direction, distance]).reshape(1, -1)
+                    np.append(next_state, [direction, distance]).reshape(1, -1),
+                    infos=[{}]
                 )
 
                 # 当经验积累到一定数量时进行批量训练
