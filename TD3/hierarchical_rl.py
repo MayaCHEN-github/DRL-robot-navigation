@@ -15,8 +15,9 @@ from gym_wrapper import VelodyneGymWrapper  # 自定义的Gym环境包装器
 from velodyne_env import GazeboEnv  # 自定义的Gazebo环境
 from typing import Dict, Any, Tuple, List, Optional  # 类型注解
 
-# 导入gym或gymnasium的空间类
+# 导入gym或gymnasium库(修不明白！)
 try:
+    import gymnasium
     from gymnasium.spaces import Box, Discrete
     gym_lib = 'gymnasium'
 except ImportError:
