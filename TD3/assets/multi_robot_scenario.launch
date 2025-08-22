@@ -1,22 +1,26 @@
 <launch>
-<arg name="gui" default="false"/>
+  <!-- 分离两个开关 -->
+  <arg name="gazebo_gui" default="false"/>   <!-- 只控制 gzclient 是否弹窗 -->
+  <arg name="rviz"       default="true"/>    <!-- 单独控制 RViz 是否启动 -->
 
   <!-- 禁用在线模型库，强制用本地模型 -->
   <env name="GAZEBO_MODEL_DATABASE_URI" value=""/>
 
-  <!-- Gazebo：显式传入你本地的 TD3.world -->
+  <!-- 启动 Gazebo 世界（不弹 GUI：gazebo_gui 默认 false） -->
   <include file="$(find multi_robot_scenario)/launch/empty_world.launch">
     <arg name="world_name" value="$(find multi_robot_scenario)/launch/TD3.world"/>
-    <arg name="gui" value="$(arg gui)"/>
+    <arg name="gui"        value="$(arg gazebo_gui)"/>
+    <!-- 可选：如果 empty_world.launch 支持 headless，就一起关掉渲染 -->
+    <arg name="headless"   value="true"/>
   </include>
 
   <!-- Robot with diff drive -->
   <include file="$(find multi_robot_scenario)/launch/pioneer3dx.gazebo.launch">
-     <arg name="robot_name" value="r1" />
-     <arg name="robot_position" value="-x 0.0 -y 0.0 -z 0.01 -R 0 -P 0 -Y +0.0" />
-   </include>
+    <arg name="robot_name"     value="r1" />
+    <arg name="robot_position" value="-x 0.0 -y 0.0 -z 0.01 -R 0 -P 0 -Y +0.0" />
+  </include>
 
-  <!-- RVIZ（仅在 gui:=true 时启动） -->
-  <node if="$(arg gui)" pkg="rviz" type="rviz" name="rviz" args="-d $(find multi_robot_scenario)/launch/pioneer3dx.rviz" />
-
+  <!-- RVIZ：独立于 Gazebo GUI 的开关 -->
+  <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz"
+        args="-d $(find multi_robot_scenario)/launch/pioneer3dx.rviz" />
 </launch>

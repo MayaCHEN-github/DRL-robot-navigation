@@ -14,3 +14,4 @@ devel_isolated/
 # logs
 runs/
 runs_dqn/
+logs/

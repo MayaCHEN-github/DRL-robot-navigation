@@ -1,6 +1,5 @@
 # 导入必要的库
 import os  # 用于文件和目录操作
-import time  # 用于时间相关操作
 import numpy as np  
 import torch  
 import optuna  # 用于超参数优化
@@ -24,6 +23,8 @@ except ImportError:
     import gym
     from gym.spaces import Box, Discrete
     gym_lib = 'gym'
+
+import sys, signal, atexit  # 用于信号处理与进程退出清理
 
 # Optuna配置
 OPTUNA_STUDY_NAME = "hierarchical_rl_study"  # 超参数优化研究的名称
@@ -82,6 +83,9 @@ class HierarchicalRL:
 
         # 创建存储目录
         self._create_directories()
+
+        # —— 注册进程退出清理（无论正常结束还是异常退出/按 Ctrl+C）
+        atexit.register(self._cleanup_gazebo_ros)
 
     def _init_environment(self):
         """初始化机器人导航环境。
@@ -151,21 +155,23 @@ class HierarchicalRL:
 
         print(f"使用{gym_lib}库定义观察空间，dtype={np.float32}")
 
-        self.high_level_buffer = ReplayBuffer(  # 高层（DQN）的经验回放缓冲区
-            buffer_size=1_000_000,
-            observation_space=high_level_observation_space,
-            action_space=high_level_action_space,
-            device=self.device,
-            n_envs=1  # 明确指定环境数量为1
-        )
-        self.low_level_buffer = ReplayBuffer(  # 低层（TD3）的经验回放缓冲区
-            buffer_size=1_000_000,
-            observation_space=low_level_observation_space,
-            action_space=low_level_action_space,
-            device=self.device,
-            n_envs=1  # 明确指定环境数量为1
-        )
-        print("使用普通经验回放缓冲区")
+        # self.high_level_buffer = ReplayBuffer(  # 高层（DQN）的经验回放缓冲区
+        #     buffer_size=1_000_000,
+        #     observation_space=high_level_observation_space,
+        #     action_space=high_level_action_space,
+        #     device=self.device,
+        #     # n_envs=1  # 明确指定环境数量为1
+        #     n_envs=getattr(self.env, "num_envs", 1)   # 自动适配环境数
+        # )
+        # self.low_level_buffer = ReplayBuffer(  # 低层（TD3）的经验回放缓冲区
+        #     buffer_size=1_000_000,
+        #     observation_space=low_level_observation_space,
+        #     action_space=low_level_action_space,
+        #     device=self.device,
+        #     # n_envs=1  # 明确指定环境数量为1
+        #     n_envs=getattr(self.env, "num_envs", 1)   # 自动适配环境数
+        # )
+        # print("使用普通经验回放缓冲区")
 
     def _init_high_level_agent(self):
         """初始化高层智能体
@@ -189,22 +195,28 @@ class HierarchicalRL:
         
         # 创建一个环境包装器，使用离散动作空间
         class DiscreteActionEnvWrapper(gymnasium.Env):
+            """
+            仅用于给 DQN 提供一个“合法”的环境接口，避免 SB3 内部调用 reset/step 时
+            真的去驱动 Gazebo。我们完全不会用它来 rollouts，只会用 high_level_agent.predict()。
+            """
             def __init__(self, env):
                 super().__init__()
                 self.env = env
                 self.observation_space = env.observation_space
                 self.action_space = high_level_action_space
-                
+                self._last_obs = None
+
             def reset(self, seed=None, options=None):
-                return self.env.reset(seed=seed, options=options)
-            
+                reset_result = self.env.reset(seed=seed, options=options)
+                obs = reset_result[0] if isinstance(reset_result, tuple) else reset_result
+                self._last_obs = obs
+                # gymnasium 需要返回 (obs, info)
+                return obs, {}
+
             def step(self, action):
-                # 这里不需要实际执行动作，因为高层动作会被解码后传递给低层智能体
-                # 我们只需要返回一个dummy结果以满足SB3的接口要求
-                # 处理可能的元组返回值
-                reset_result = self.env.reset()
-                state = reset_result[0] if isinstance(reset_result, tuple) else reset_result
-                return state, 0.0, False, False, {}
+                # 不要在 step() 里 reset 环境！返回一个 no-op 的一步即可。
+                assert self._last_obs is not None, "Call reset() before step()."
+                return self._last_obs, 0.0, False, False, {}
             
             def render(self, mode='human'):
                 return self.env.render(mode=mode)
@@ -290,6 +302,34 @@ class HierarchicalRL:
         for dir_path in directories:
             if not os.path.exists(dir_path):
                 os.makedirs(dir_path, exist_ok=True)
+
+    def _prepare_sb3_train(self, agent):
+        """
+        让 SB3 智能体在不走 learn() 的情况下，也能安全调用 train()。
+        - 创建 logger
+        - 设置进度变量
+        - 补齐统计计数器
+        """
+        # 1) logger（SB3 的 train() 会用到）
+        if getattr(agent, "_logger", None) is None:
+            from stable_baselines3.common.logger import configure
+            agent._logger = configure(folder=None, format_strings=["stdout"])
+
+        # 2) 进度变量（用于学习率调度）
+        if not hasattr(agent, "_current_progress_remaining"):
+            agent._current_progress_remaining = 1.0  # 相当于训练刚开始
+
+        # 3) 计数器（有些算法在日志里会用到）
+        if not hasattr(agent, "_n_updates"):
+            agent._n_updates = 0
+        if not hasattr(agent, "num_timesteps"):
+            agent.num_timesteps = 0
+
+        # 4) 兜底：有些版本把 lr_schedule 挂在 agent 上；通常已存在，这里防御性补一下
+        if not hasattr(agent, "lr_schedule"):
+            # 尽量用 agent.learning_rate，缺省 3e-4
+            base_lr = float(getattr(agent, "learning_rate", 3e-4))
+            agent.lr_schedule = lambda progress: base_lr * 1.0  # 固定学习率
 
     def load_high_level_model(self, model_path):
         """加载高层DQN模型
@@ -429,235 +469,127 @@ class HierarchicalRL:
         return high_level_reward, low_level_reward
 
     def train(self, log_interval=1000):
-        """训练层级强化学习模型
-
-        该方法实现了层级强化学习系统的完整训练流程。高层智能体(DQN)负责决策
-        导航方向和距离，低层智能体(TD3)负责执行具体的运动控制。训练过程中，
-        两个智能体通过经验回放缓冲区进行学习，并根据环境反馈调整策略。
-
-        参数:
-            log_interval (int): 日志打印间隔，控制训练过程中的信息输出频率
-        """
+        """分层强化学习训练（外部采样 → 内部 buffer → 仅梯度更新）"""
         print("开始层级强化学习训练...")
 
-        # 创建检查点回调
-        high_level_checkpoint = CheckpointCallback(
-            save_freq=self.eval_freq,
-            save_path="./pytorch_models/high_level/",
-            name_prefix="high_level_dqn"
-        )
-
-        low_level_checkpoint = CheckpointCallback(
-            save_freq=self.eval_freq,
-            save_path="./pytorch_models/low_level/",
-            name_prefix="low_level_td3"
-        )
+        self._prepare_sb3_train(self.high_level_agent)
+        self._prepare_sb3_train(self.low_level_agent)
 
         timestep = 0
         evaluations = []
-        self.prev_direction = 0.0  # 初始化前一方向
+        self.prev_direction = 0.0  # 用于平滑奖励
+
+        # 方便书写
+        H_BUF = self.high_level_agent.replay_buffer
+        L_BUF = self.low_level_agent.replay_buffer
+        H_BS  = self.high_level_agent.batch_size
+        L_BS  = self.low_level_agent.batch_size
 
         while timestep < self.max_timesteps:
-            # 高层决策: 选择方向
-            # 正确处理reset方法的返回值
+            # reset
             reset_result = self.env.reset()
             state = reset_result[0] if isinstance(reset_result, tuple) else reset_result
             done = False
-            episode_reward = 0
+            episode_reward = 0.0
             episode_timesteps = 0
 
             while not done and episode_timesteps < self.max_ep:
-                # 更新探索参数
+                # 探索参数更新（epsilon / 噪声）
                 self._update_exploration_parameters(timestep)
 
-                # 高层DQN决定方向和距离
+                # ===== 高层：离散 action -> (direction, distance) =====
+                # 这里只用 policy 的 predict，不让 SB3 自己 rollouts
                 high_level_action = self.high_level_agent.predict(state, deterministic=False)[0]
-                direction = high_level_action % 20  # 20个方向
-                distance = (high_level_action // 20) * 0.5 + 0.5  # 距离范围: 0.5-5.0米
+                direction = high_level_action % 20
+                distance  = (high_level_action // 20) * 0.5 + 0.5  # 0.5 ~ 5.0
 
-                # 低层TD3执行子目标
+                # ===== 低层：连续动作（把子目标拼进观测）=====
                 sub_goal_state = np.append(state, [direction, distance])
                 low_level_action = self.low_level_agent.predict(sub_goal_state, deterministic=False)[0]
 
-                # 执行动作
+                # 与 Gazebo 真正交互的一步
                 next_state, reward, terminated, truncated, info = self.env.step(low_level_action)
 
-                # 添加调试信息
-                print(f"terminated type: {type(terminated)}, shape: {np.shape(terminated) if hasattr(terminated, 'shape') else 'N/A'}")
-                print(f"truncated type: {type(truncated)}, shape: {np.shape(truncated) if hasattr(truncated, 'shape') else 'N/A'}")
-                
-                # 确保terminated和truncated是标量布尔值
-                # 如果是数组，使用np.any()检查是否有True值
+                # 规整 done（terminated 或 truncated）
                 if isinstance(terminated, np.ndarray):
-                    # 强制转换为标量布尔值
                     terminated = bool(np.any(terminated))
-                    print(f"Converted terminated array to scalar: {terminated}")
                 else:
                     terminated = bool(terminated)
-                    print(f"Converted terminated to bool: {terminated}")
-                
                 if isinstance(truncated, np.ndarray):
-                    # 强制转换为标量布尔值
                     truncated = bool(np.any(truncated))
-                    print(f"Converted truncated array to scalar: {truncated}")
                 else:
                     truncated = bool(truncated)
-                    print(f"Converted truncated to bool: {truncated}")
-                
                 done = terminated or truncated
-                print(f"done type: {type(done)}, value: {done}")
-                
-                # 最后的安全检查 - 确保done是标量布尔值
-                if not isinstance(done, bool):
-                    print("WARNING: done is not a boolean! Forcing conversion.")
-                    done = bool(done)
-                    print(f"After final conversion: done type: {type(done)}, value: {done}")
                 target = info.get('target_reached', False)
 
-                # 计算奖励
+                # 奖励（沿用你已有的函数）
                 high_level_reward, low_level_reward = self._calculate_rewards(
-                        state, next_state, high_level_action, distance, done, target, episode_timesteps, reward, info
-                    )
+                    state, next_state, high_level_action, distance,
+                    done, target, episode_timesteps, reward, info
+                )
 
-                # 存储经验到缓冲区前再次检查done
-                print(f"Before high_level_buffer.add(): done type: {type(done)}, shape: {np.shape(done) if hasattr(done, 'shape') else 'N/A'}, value: {done}")
-                # 确保done是标量并转换为形状为(1,)的数组
-                done_scalar = bool(done)
-                done_array = np.array([done_scalar], dtype=np.bool_)
-                print(f"Final done array shape: {done_array.shape}, value: {done_array}")
-                
-                # 直接使用形状为(1,)的done数组
-                try:
-                    self.high_level_buffer.add(
-                        state.reshape(1, -1),
-                        high_level_action,
-                        high_level_reward,
-                        done_array,
-                        next_state.reshape(1, -1),
-                        infos=[{}]
-                    )
-                except Exception as e:
-                    print(f"Error adding to high_level_buffer: {e}")
-                    print(f"Buffer dones shape: {self.high_level_buffer.dones.shape}")
-                    print(f"Current done array shape: {done_array.shape}")
-                    
-                    # 尝试将done数组扩展为与缓冲区匹配的形状
-                    try:
-                        buffer_dones_shape = self.high_level_buffer.dones.shape
-                        if len(buffer_dones_shape) > 1:
-                            target_shape = buffer_dones_shape[1]
-                            done_reshaped = np.array([done_scalar] * target_shape, dtype=np.bool_)
-                            print(f"Reshaped done array to shape: {done_reshaped.shape}")
-                            self.high_level_buffer.add(
-                                state.reshape(1, -1),
-                                high_level_action,
-                                high_level_reward,
-                                done_reshaped,
-                                next_state.reshape(1, -1),
-                                infos=[{}]
-                            )
-                        else:
-                            raise
-                    except Exception as e2:
-                        print(f"Error after reshaping: {e2}")
-                        # 最后的 fallback: 使用标量
-                        self.high_level_buffer.add(
-                                state.reshape(1, -1),
-                                high_level_action,
-                                high_level_reward,
-                                done_scalar,
-                                next_state.reshape(1, -1),
-                                infos=[{}]
-                            )
+                # ====== 往“各自模型的内部 buffer”里 add ======
+                # 高层（obs_dim）
+                obs_h      = state.reshape(1, -1)
+                next_obs_h = next_state.reshape(1, -1)
+                act_h      = np.array([[high_level_action]], dtype=np.int64)
+                rew_h      = np.array([high_level_reward], dtype=np.float32)
+                done_h     = np.array([bool(done)], dtype=np.bool_)
+                H_BUF.add(obs_h, next_obs_h, act_h, rew_h, done_h, infos=[{}])
 
-                print(f"Before low_level_buffer.add(): done type: {type(done)}, shape: {np.shape(done) if hasattr(done, 'shape') else 'N/A'}, value: {done}")
-                # 对低层缓冲区使用相同的处理
-                done_scalar = bool(done)
-                done_array = np.array([done_scalar], dtype=np.bool_)
-                print(f"Low level final done array shape: {done_array.shape}, value: {done_array}")
-                
-                # 直接使用形状为(1,)的done数组
-                try:
-                    self.low_level_buffer.add(
-                        sub_goal_state.reshape(1, -1),
-                        low_level_action,
-                        low_level_reward,
-                        done_array,
-                        np.append(next_state, [direction, distance]).reshape(1, -1),
-                        infos=[{}]
-                    )
-                except Exception as e:
-                    print(f"Error adding to low_level_buffer: {e}")
-                    print(f"Low level buffer dones shape: {self.low_level_buffer.dones.shape}")
-                    print(f"Current done array shape: {done_array.shape}")
-                    
-                    # 尝试将done数组扩展为与缓冲区匹配的形状
-                    try:
-                        buffer_dones_shape = self.low_level_buffer.dones.shape
-                        if len(buffer_dones_shape) > 1:
-                            target_shape = buffer_dones_shape[1]
-                            done_reshaped = np.array([done_scalar] * target_shape, dtype=np.bool_)
-                            print(f"Low level reshaped done array to shape: {done_reshaped.shape}")
-                            self.low_level_buffer.add(
-                                sub_goal_state.reshape(1, -1),
-                                low_level_action,
-                                low_level_reward,
-                                done_reshaped,
-                                np.append(next_state, [direction, distance]).reshape(1, -1),
-                                infos=[{}]
-                            )
-                        else:
-                            raise
-                    except Exception as e2:
-                        print(f"Error after low level reshaping: {e2}")
-                        # 最后的 fallback: 使用标量
-                        self.low_level_buffer.add(
-                            sub_goal_state.reshape(1, -1),
-                            low_level_action,
-                            low_level_reward,
-                            done_scalar,
-                            np.append(next_state, [direction, distance]).reshape(1, -1),
-                            infos=[{}]
-                        )
+                # 低层（obs_dim + 2）
+                obs_l      = sub_goal_state.reshape(1, -1)
+                next_obs_l = np.append(next_state, [direction, distance]).reshape(1, -1)
+                act_l      = np.array(low_level_action, dtype=np.float32).reshape(1, -1)
+                rew_l      = np.array([low_level_reward], dtype=np.float32)
+                done_l     = np.array([bool(done)], dtype=np.bool_)
+                L_BUF.add(obs_l, next_obs_l, act_l, rew_l, done_l, infos=[{}])
 
-                # 当经验积累到一定数量时进行批量训练
-                if self.high_level_buffer.size() >= self.batch_train_size and self.low_level_buffer.size() >= self.batch_train_size:
-                    print(f"进行批量训练 - 高层经验: {self.high_level_buffer.size()}, 低层经验: {self.low_level_buffer.size()}")
+                # ====== 触发“纯梯度更新”而不采样环境 ======
+                # 注意：train() 只会从 replay_buffer 采样，不会 reset/step 环境
+                if H_BUF.size() >= max(H_BS, self.batch_train_size) and L_BUF.size() >= max(L_BS, self.batch_train_size):
+                    print(f"进行批量训练 - 高层经验: {H_BUF.size()}, 低层经验: {L_BUF.size()}")
+                    # 先准备好智能体（补 logger、进度变量等）
+                    self._prepare_sb3_train(self.high_level_agent)
+                    self._prepare_sb3_train(self.low_level_agent)
+                    # 再做纯梯度更新（不触发环境交互）
+                    self.high_level_agent.train(gradient_steps=self.batch_train_size, batch_size=H_BS)
+                    self.low_level_agent.train(gradient_steps=self.batch_train_size, batch_size=L_BS)
 
-                    # 由于已禁用PER，此处省略beta参数更新
-
-                    # 训练高层DQN
-                    self.high_level_agent.learn(total_timesteps=self.batch_train_size, reset_num_timesteps=False)
-                    # 训练低层TD3
-                    self.low_level_agent.learn(total_timesteps=self.batch_train_size, reset_num_timesteps=False)
-
-                # 更新状态
+                # 滚动
                 state = next_state
                 episode_reward += reward
                 episode_timesteps += 1
                 timestep += 1
 
-                # 评估
+                # 评估 + 定期手动保存（原先的 CheckpointCallback 依赖 learn）
                 if timestep % self.eval_freq == 0:
                     eval_reward = self.evaluate()
                     evaluations.append(eval_reward)
                     np.save("./results/hierarchical_rl_evaluations.npy", evaluations)
+                    self.high_level_agent.save(f"./pytorch_models/high_level/ckpt_{timestep}")
+                    self.low_level_agent.save(f"./pytorch_models/low_level/ckpt_{timestep}")
 
-            # 每回合结束后，处理剩余经验
-            if self.high_level_buffer.size() > 0 or self.low_level_buffer.size() > 0:
-                print(f"回合结束，训练剩余经验 - 高层: {self.high_level_buffer.size()}, 低层: {self.low_level_buffer.size()}")
-                # 训练高层DQN (使用剩余经验的一半进行训练)
-                train_steps = max(1, self.high_level_buffer.size() // 2)
-                self.high_level_agent.learn(total_timesteps=train_steps, reset_num_timesteps=False)
-                # 训练低层TD3
-                train_steps = max(1, self.low_level_buffer.size() // 2)
-                self.low_level_agent.learn(total_timesteps=train_steps, reset_num_timesteps=False)
+            # ------- 回合结束后，用“剩余经验”再多做一些梯度步 -------
+            if H_BUF.size() > 0 or L_BUF.size() > 0:
+                print(f"回合结束，训练剩余经验 - 高层: {H_BUF.size()}, 低层: {L_BUF.size()}")
+                
+                # 仅当样本 >= batch_size 才训练，避免 SB3 采样报错
+                if H_BUF.size() >= H_BS:
+                    steps_h = max(1, H_BUF.size() // 2)
+                    self._prepare_sb3_train(self.high_level_agent)
+                    self.high_level_agent.train(gradient_steps=steps_h, batch_size=H_BS)
 
-            # 控制日志输出频率
-            if (timestep//self.max_ep) % log_interval == 0:
+                if L_BUF.size() >= L_BS:
+                    steps_l = max(1, L_BUF.size() // 2)
+                    self._prepare_sb3_train(self.low_level_agent)
+                    self.low_level_agent.train(gradient_steps=steps_l, batch_size=L_BS)
+
+            # 日志
+            if (timestep // self.max_ep) % log_interval == 0:
                 print(f"回合 {timestep//self.max_ep} 完成，总步数: {timestep}, 奖励: {episode_reward:.2f}")
 
-        # 保存最终模型
+        # 最终保存
         self.high_level_agent.save("./pytorch_models/high_level/final_model")
         self.low_level_agent.save("./pytorch_models/low_level/final_model")
         print("训练完成!")
@@ -821,6 +753,35 @@ class HierarchicalRL:
         print(f"成功率: {success_rate:.2%}, 碰撞率: {collision_rate:.2%}")
 
         return avg_reward
+    
+    def _cleanup_gazebo_ros(self):
+        """
+        自动清理：关闭 gym/env，杀掉残留的 ros/gazebo 进程，并清理共享内存文件。
+        只在本脚本内部调用，不改外部工程。
+        """
+        # 1) 先尝试优雅关闭 wrapper/env（如果实现了）
+        try:
+            if hasattr(self, "env") and hasattr(self.env, "close"):
+                self.env.close()
+        except Exception:
+            pass
+        # 也尝试关掉 agent 里可能持有的 env
+        try:
+            if hasattr(self, "high_level_agent") and hasattr(self.high_level_agent, "env") and self.high_level_agent.env is not None:
+                self.high_level_agent.env.close()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "low_level_agent") and hasattr(self.low_level_agent, "env") and self.low_level_agent.env is not None:
+                self.low_level_agent.env.close()
+        except Exception:
+            pass
+
+        # 2) 兜底：干掉常见的 ros/gazebo 进程（只针对本机用户，-f 以命令行匹配）
+        os.system("pkill -9 -f 'gazebo_ros/gzserver|gzserver -e ode|roslaunch|rosmaster|rosout|gzclient' 2>/dev/null || true")
+
+        # 3) 清理 Gazebo 共享内存/锁文件，避免下次启动 255
+        os.system("rm -f /dev/shm/gazebo-* /tmp/gazebo* 2>/dev/null || true")
 
 
 
@@ -859,7 +820,20 @@ def main(optimize=False):
         hierarchical_agent = HierarchicalRL(environment_dim=20, max_timesteps=5e6)
 
     # 开始训练
-    hierarchical_agent.train()
+    # —— 安装信号处理：Ctrl+C / kill 都会先清理再退出
+    def _sig_handler(sig, frame):
+        try:
+            hierarchical_agent._cleanup_gazebo_ros()
+        finally:
+            sys.exit(0)
+    signal.signal(signal.SIGINT, _sig_handler)
+    signal.signal(signal.SIGTERM, _sig_handler)
+
+    # —— 开始训练（确保无论如何都会清理一次）
+    try:
+        hierarchical_agent.train()
+    finally:
+        hierarchical_agent._cleanup_gazebo_ros()
 
 
 if __name__ == "__main__":

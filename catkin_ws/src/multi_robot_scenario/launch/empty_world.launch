@@ -14,7 +14,7 @@
   <arg name="physics" default="ode"/>
   <arg name="verbose" default="false"/>
   <arg name="world_name" default="TD3.world"/>
-  <arg name="respawn_gazebo" default="true"/>
+  <arg name="respawn_gazebo" default="false"/>
   <arg name="use_clock_frequency" default="false"/>
   <arg name="pub_clock_frequency" default="1000"/>
 
