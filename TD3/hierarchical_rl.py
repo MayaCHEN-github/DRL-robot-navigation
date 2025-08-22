@@ -503,56 +503,73 @@ class HierarchicalRL:
                 episode_timesteps = 0
                 pbar.set_postfix({"回合": episode_count, "当前奖励": f"{episode_reward:.2f}"})
 
-            while not done and episode_timesteps < self.max_ep:
-                # 探索参数更新（epsilon / 噪声）
-                self._update_exploration_parameters(timestep)
+                while not done and episode_timesteps < self.max_ep:
+                    # 探索参数更新（epsilon / 噪声）
+                    self._update_exploration_parameters(timestep)
 
-                # ===== 高层：离散 action -> (direction, distance) =====
-                # 这里只用 policy 的 predict，不让 SB3 自己 rollouts
-                high_level_action = self.high_level_agent.predict(state, deterministic=False)[0]
-                direction = high_level_action % 20
-                distance  = (high_level_action // 20) * 0.5 + 0.5  # 0.5 ~ 5.0
+                    # ===== 高层：离散 action -> (direction, distance) =====
+                    # 这里只用 policy 的 predict，不让 SB3 自己 rollouts
+                    high_level_action = self.high_level_agent.predict(state, deterministic=False)[0]
+                    direction = high_level_action % 20
+                    distance  = (high_level_action // 20) * 0.5 + 0.5  # 0.5 ~ 5.0
 
-                # ===== 低层：连续动作（把子目标拼进观测）=====
-                sub_goal_state = np.append(state, [direction, distance])
-                low_level_action = self.low_level_agent.predict(sub_goal_state, deterministic=False)[0]
+                    # ===== 低层：连续动作（把子目标拼进观测）=====
+                    sub_goal_state = np.append(state, [direction, distance])
+                    low_level_action = self.low_level_agent.predict(sub_goal_state, deterministic=False)[0]
 
-                # 与 Gazebo 真正交互的一步
-                next_state, reward, terminated, truncated, info = self.env.step(low_level_action)
-                done = terminated or truncated
+                    # 与 Gazebo 真正交互的一步
+                    next_state, env_reward, terminated, truncated, info = self.env.step(low_level_action)
+                    done = terminated or truncated
+                    target = info.get('target_reached', False) if info else False
 
-                # 更新回合奖励
-                episode_reward += reward
+                    # 计算自定义奖励
+                    high_level_reward, low_level_reward = self.get_reward(
+                        state=state, 
+                        next_state=next_state, 
+                        action=high_level_action, 
+                        distance=distance, 
+                        done=done, 
+                        target=target, 
+                        episode_timesteps=episode_timesteps, 
+                        reward=env_reward, 
+                        info=info
+                    )
 
-                # 高层经验：(s, a_high, R)，R是回合总奖励（延迟更新）
-                # 低层经验：(s', a_low, r)，r是单步奖励
-                H_BUF.add(state, high_level_action, 0.0, next_state, done)
-                L_BUF.add(sub_goal_state, low_level_action, reward, np.append(next_state, [direction, distance]), done)
+                    # 更新回合奖励（使用高层奖励）
+                    episode_reward += high_level_reward
 
-                # 高级智能体的更新条件：每 N 步 AND 缓冲区足够大
-                if len(H_BUF) > self.learn_starts and timestep % self.train_freq == 0:
-                    self.high_level_agent.train(batch_size=H_BS, gradient_steps=1)
+                    # 高层经验：(s, a_high, R)，R是回合总奖励（延迟更新）
+                    # 低层经验：(s', a_low, r)，r是单步奖励
+                    # 注意：高层奖励将在回合结束时更新
+                    H_BUF.add(state, high_level_action, 0.0, next_state, done)
+                    L_BUF.add(sub_goal_state, low_level_action, low_level_reward, np.append(next_state, [direction, distance]), done)
 
-                # 低级智能体的更新条件：只要缓冲区足够大
-                if len(L_BUF) > self.learn_starts:
-                    self.low_level_agent.train(batch_size=L_BS, gradient_steps=1)
+                    # 高级智能体的更新条件：每 N 步 AND 缓冲区足够大
+                    if len(H_BUF) > self.learn_starts and timestep % self.train_freq == 0:
+                        self.high_level_agent.train(batch_size=H_BS, gradient_steps=1)
 
-                # 状态转移
-                state = next_state
-                timestep += 1
-                episode_timesteps += 1
+                    # 低级智能体的更新条件：只要缓冲区足够大
+                    if len(L_BUF) > self.learn_starts:
+                        self.low_level_agent.train(batch_size=L_BS, gradient_steps=1)
 
-                # 更新进度条
-                pbar.update(1)
-                pbar.set_postfix({"回合": episode_count, "当前奖励": f"{episode_reward:.2f}"})
-                # 探索参数更新（epsilon / 噪声）
-                self._update_exploration_parameters(timestep)
+                    # 状态转移
+                    state = next_state
+                    timestep += 1
+                    episode_timesteps += 1
 
-                # ===== 高层：离散 action -> (direction, distance) =====
-                # 这里只用 policy 的 predict，不让 SB3 自己 rollouts
-                high_level_action = self.high_level_agent.predict(state, deterministic=False)[0]
-                direction = high_level_action % 20
-                distance  = (high_level_action // 20) * 0.5 + 0.5  # 0.5 ~ 5.0
+                    # 更新进度条
+                    pbar.update(1)
+                    pbar.set_postfix({"回合": episode_count, "当前奖励": f"{episode_reward:.2f}"})
+
+                # 回合结束时更新高层经验的奖励值
+                if done:
+                    # 这里简化处理，实际应该找到该回合的所有经验并更新
+                    # 为了简单，我们只更新最后一条经验的奖励
+                    if len(H_BUF) > 0:
+                        # 获取最后一条经验
+                        last_idx = len(H_BUF) - 1
+                        # 更新奖励为回合总奖励
+                        H_BUF.rewards[last_idx] = episode_reward
 
                 # ===== 低层：连续动作（把子目标拼进观测）=====
                 sub_goal_state = np.append(state, [direction, distance])
