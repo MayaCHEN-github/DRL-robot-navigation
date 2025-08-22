@@ -501,7 +501,7 @@ class HierarchicalRL:
                 done = False
                 episode_reward = 0.0
                 episode_timesteps = 0
-                pbar.set_postfix({{"回合": episode_count, "当前奖励": f"{episode_reward:.2f}"}})
+                pbar.set_postfix({"回合": episode_count, "当前奖励": f"{episode_reward:.2f}"})
 
             while not done and episode_timesteps < self.max_ep:
                 # 探索参数更新（epsilon / 噪声）
