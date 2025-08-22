@@ -541,12 +541,12 @@ class HierarchicalRL:
                     # 高层经验：(s, a_high, R)，R是回合总奖励（延迟更新）
                     # 低层经验：(s', a_low, r)，r是单步奖励
                     # 注意：高层奖励将在回合结束时更新
-                    # Add experience to replay buffers with correct parameter order
-                    H_BUF.add(state, next_state, high_level_action, 0.0, done, infos=[info] if info else [])
-                    L_BUF.add(sub_goal_state, np.append(next_state, [direction, distance]), low_level_action, low_level_reward, done, infos=[info] if info else [])
+                    # Add experience to replay buffers with correct parameter order for custom ReplayBuffer
+                    H_BUF.add(state, high_level_action, 0.0, done, next_state)
+                    L_BUF.add(sub_goal_state, low_level_action, low_level_reward, done, np.append(next_state, [direction, distance]))
 
                     # 高级智能体的更新条件：每 N 步 AND 缓冲区足够大
-                    if len(H_BUF) > self.learn_starts and timestep % self.train_freq == 0:
+                    if H_BUF.size() > self.learn_starts and timestep % self.train_freq == 0:
                         self.high_level_agent.train(batch_size=H_BS, gradient_steps=1)
 
                     # 低级智能体的更新条件：只要缓冲区足够大
