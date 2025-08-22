@@ -7,6 +7,7 @@ from stable_baselines3 import DQN, TD3
 from stable_baselines3.common.callbacks import CheckpointCallback  # 从sb3导入的模型检查点callback
 # 从sb3导入的经验回放缓冲区
 from stable_baselines3.common.buffers import ReplayBuffer
+from tqdm import tqdm  # 用于显示进度条
 
 # 移除了PrioritizedReplayBuffer的导入，因为该类不可用
 PRIORITIZED_REPLAY_AVAILABLE = False
@@ -478,6 +479,7 @@ class HierarchicalRL:
         timestep = 0
         evaluations = []
         self.prev_direction = 0.0  # 用于平滑奖励
+        episode_count = 0  # 回合计数器，从1开始
 
         # 方便书写
         H_BUF = self.high_level_agent.replay_buffer
@@ -485,13 +487,21 @@ class HierarchicalRL:
         H_BS  = self.high_level_agent.batch_size
         L_BS  = self.low_level_agent.batch_size
 
-        while timestep < self.max_timesteps:
-            # reset
-            reset_result = self.env.reset()
-            state = reset_result[0] if isinstance(reset_result, tuple) else reset_result
-            done = False
-            episode_reward = 0.0
-            episode_timesteps = 0
+        # 计算总回合数
+        total_episodes = int(self.max_timesteps / self.max_ep) + 1
+        print(f"总回合数: {total_episodes}")
+
+        # 创建进度条
+        with tqdm(total=self.max_timesteps, desc="训练进度", position=1, leave=True) as pbar:
+            while timestep < self.max_timesteps:
+                # 新回合开始
+                episode_count += 1
+                reset_result = self.env.reset()
+                state = reset_result[0] if isinstance(reset_result, tuple) else reset_result
+                done = False
+                episode_reward = 0.0
+                episode_timesteps = 0
+                pbar.set_postfix({{"回合": episode_count, "当前奖励": f"{episode_reward:.2f}"}})
 
             while not done and episode_timesteps < self.max_ep:
                 # 探索参数更新（epsilon / 噪声）
@@ -561,6 +571,8 @@ class HierarchicalRL:
                 episode_reward += reward
                 episode_timesteps += 1
                 timestep += 1
+                pbar.update(1)
+                pbar.set_postfix({{"回合": episode_count, "当前奖励": f"{episode_reward:.2f}"}})
 
                 # 评估 + 定期手动保存（原先的 CheckpointCallback 依赖 learn）
                 if timestep % self.eval_freq == 0:
@@ -586,8 +598,8 @@ class HierarchicalRL:
                     self.low_level_agent.train(gradient_steps=steps_l, batch_size=L_BS)
 
             # 日志
-            if (timestep // self.max_ep) % log_interval == 0:
-                print(f"回合 {timestep//self.max_ep} 完成，总步数: {timestep}, 奖励: {episode_reward:.2f}")
+            if episode_count % log_interval == 0:
+                print(f"回合 {episode_count} 完成，总步数: {timestep}, 奖励: {episode_reward:.2f}")
 
         # 最终保存
         self.high_level_agent.save("./pytorch_models/high_level/final_model")
