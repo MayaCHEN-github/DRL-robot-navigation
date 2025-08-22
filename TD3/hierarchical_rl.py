@@ -523,7 +523,7 @@ class HierarchicalRL:
                     target = info.get('target_reached', False) if info else False
 
                     # 计算自定义奖励
-                    high_level_reward, low_level_reward = self.get_reward(
+                    high_level_reward, low_level_reward = self._calculate_rewards(
                         state=state, 
                         next_state=next_state, 
                         action=high_level_action, 
