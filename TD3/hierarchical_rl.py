@@ -542,8 +542,20 @@ class HierarchicalRL:
                     # 低层经验：(s', a_low, r)，r是单步奖励
                     # 注意：高层奖励将在回合结束时更新
                     # Add experience to replay buffers with correct parameter order for custom ReplayBuffer
-                    H_BUF.add(state, high_level_action, 0.0, done, next_state)
-                    L_BUF.add(sub_goal_state, low_level_action, low_level_reward, done, np.append(next_state, [direction, distance]))
+                    # Format experience for SB3 ReplayBuffer
+                    obs_h = state.reshape(1, -1)
+                    next_obs_h = next_state.reshape(1, -1)
+                    act_h = np.array([[high_level_action]], dtype=np.int64)
+                    rew_h = np.array([0.0], dtype=np.float32)
+                    done_h = np.array([bool(done)], dtype=np.bool_)
+                    H_BUF.add(obs_h, next_obs_h, act_h, rew_h, done_h, infos=[{}])
+
+                    obs_l = sub_goal_state.reshape(1, -1)
+                    next_obs_l = np.append(next_state, [direction, distance]).reshape(1, -1)
+                    act_l = np.array(low_level_action, dtype=np.float32).reshape(1, -1)
+                    rew_l = np.array([low_level_reward], dtype=np.float32)
+                    done_l = np.array([bool(done)], dtype=np.bool_)
+                    L_BUF.add(obs_l, next_obs_l, act_l, rew_l, done_l, infos=[{}])
 
                     # 高级智能体的更新条件：每 N 步 AND 缓冲区足够大
                     if H_BUF.size() > self.learn_starts and timestep % self.train_freq == 0:
