@@ -492,7 +492,7 @@ class HierarchicalRL:
         print(f"总回合数: {total_episodes}")
 
         # 创建进度条
-        with tqdm(total=self.max_timesteps, desc="训练进度", position=1, leave=True) as pbar:
+        with tqdm(total=self.max_timesteps, desc="训练进度", position=1, leave=True, dynamic_ncols=True) as pbar:
             while timestep < self.max_timesteps:
                 # 新回合开始
                 episode_count += 1
@@ -504,6 +504,47 @@ class HierarchicalRL:
                 pbar.set_postfix({"回合": episode_count, "当前奖励": f"{episode_reward:.2f}"})
 
             while not done and episode_timesteps < self.max_ep:
+                # 探索参数更新（epsilon / 噪声）
+                self._update_exploration_parameters(timestep)
+
+                # ===== 高层：离散 action -> (direction, distance) =====
+                # 这里只用 policy 的 predict，不让 SB3 自己 rollouts
+                high_level_action = self.high_level_agent.predict(state, deterministic=False)[0]
+                direction = high_level_action % 20
+                distance  = (high_level_action // 20) * 0.5 + 0.5  # 0.5 ~ 5.0
+
+                # ===== 低层：连续动作（把子目标拼进观测）=====
+                sub_goal_state = np.append(state, [direction, distance])
+                low_level_action = self.low_level_agent.predict(sub_goal_state, deterministic=False)[0]
+
+                # 与 Gazebo 真正交互的一步
+                next_state, reward, terminated, truncated, info = self.env.step(low_level_action)
+                done = terminated or truncated
+
+                # 更新回合奖励
+                episode_reward += reward
+
+                # 高层经验：(s, a_high, R)，R是回合总奖励（延迟更新）
+                # 低层经验：(s', a_low, r)，r是单步奖励
+                H_BUF.add(state, high_level_action, 0.0, next_state, done)
+                L_BUF.add(sub_goal_state, low_level_action, reward, np.append(next_state, [direction, distance]), done)
+
+                # 高级智能体的更新条件：每 N 步 AND 缓冲区足够大
+                if len(H_BUF) > self.learn_starts and timestep % self.train_freq == 0:
+                    self.high_level_agent.train(batch_size=H_BS, gradient_steps=1)
+
+                # 低级智能体的更新条件：只要缓冲区足够大
+                if len(L_BUF) > self.learn_starts:
+                    self.low_level_agent.train(batch_size=L_BS, gradient_steps=1)
+
+                # 状态转移
+                state = next_state
+                timestep += 1
+                episode_timesteps += 1
+
+                # 更新进度条
+                pbar.update(1)
+                pbar.set_postfix({"回合": episode_count, "当前奖励": f"{episode_reward:.2f}"})
                 # 探索参数更新（epsilon / 噪声）
                 self._update_exploration_parameters(timestep)
 
