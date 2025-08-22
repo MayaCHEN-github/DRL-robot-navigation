@@ -72,6 +72,16 @@ class HierarchicalRL:
         self.current_epsilon = epsilon_start  # 当前epsilon值
         self.current_noise = noise_start  # 当前噪声值
 
+        # 训练开始前收集的经验数量
+        self.learn_starts = 1000  # 默认为1000步
+
+        # 高层智能体训练频率（每多少步训练一次）
+        self.train_freq = 100  # 默认为每100步训练一次
+
+        # 高层和低层智能体的批量训练大小
+        self.H_BS = 100  # 高层智能体批量训练大小
+        self.L_BS = 100  # 低层智能体批量训练大小
+
         # 初始化环境
         self.env = self._init_environment()
 
@@ -559,11 +569,11 @@ class HierarchicalRL:
 
                     # 高级智能体的更新条件：每 N 步 AND 缓冲区足够大
                     if H_BUF.size() > self.learn_starts and timestep % self.train_freq == 0:
-                        self.high_level_agent.train(batch_size=H_BS, gradient_steps=1)
+                        self.high_level_agent.train(batch_size=self.H_BS, gradient_steps=1)
 
                     # 低级智能体的更新条件：只要缓冲区足够大
                     if len(L_BUF) > self.learn_starts:
-                        self.low_level_agent.train(batch_size=L_BS, gradient_steps=1)
+                        self.low_level_agent.train(batch_size=self.L_BS, gradient_steps=1)
 
                     # 状态转移
                     state = next_state
@@ -628,14 +638,14 @@ class HierarchicalRL:
 
                 # ====== 触发“纯梯度更新”而不采样环境 ======
                 # 注意：train() 只会从 replay_buffer 采样，不会 reset/step 环境
-                if H_BUF.size() >= max(H_BS, self.batch_train_size) and L_BUF.size() >= max(L_BS, self.batch_train_size):
+                if H_BUF.size() >= max(self.H_BS, self.batch_train_size) and L_BUF.size() >= max(self.L_BS, self.batch_train_size):
                     # print(f"进行批量训练 - 高层经验: {H_BUF.size()}, 低层经验: {L_BUF.size()}")
                     # 先准备好智能体（补 logger、进度变量等）
                     self._prepare_sb3_train(self.high_level_agent)
                     self._prepare_sb3_train(self.low_level_agent)
                     # 再做纯梯度更新（不触发环境交互）
-                    self.high_level_agent.train(gradient_steps=self.batch_train_size, batch_size=H_BS)
-                    self.low_level_agent.train(gradient_steps=self.batch_train_size, batch_size=L_BS)
+                    self.high_level_agent.train(gradient_steps=self.batch_train_size, batch_size=self.H_BS)
+                    self.low_level_agent.train(gradient_steps=self.batch_train_size, batch_size=self.L_BS)
 
                 # 滚动
                 state = next_state
@@ -658,15 +668,15 @@ class HierarchicalRL:
                 print(f"回合结束，训练剩余经验 - 高层: {H_BUF.size()}, 低层: {L_BUF.size()}")
                 
                 # 仅当样本 >= batch_size 才训练，避免 SB3 采样报错
-                if H_BUF.size() >= H_BS:
+                if H_BUF.size() >= self.H_BS:
                     steps_h = max(1, H_BUF.size() // 2)
                     self._prepare_sb3_train(self.high_level_agent)
-                    self.high_level_agent.train(gradient_steps=steps_h, batch_size=H_BS)
+                    self.high_level_agent.train(gradient_steps=steps_h, batch_size=self.H_BS)
 
-                if L_BUF.size() >= L_BS:
+                if L_BUF.size() >= self.L_BS:
                     steps_l = max(1, L_BUF.size() // 2)
                     self._prepare_sb3_train(self.low_level_agent)
-                    self.low_level_agent.train(gradient_steps=steps_l, batch_size=L_BS)
+                    self.low_level_agent.train(gradient_steps=steps_l, batch_size=self.L_BS)
 
             # 日志
             if episode_count % log_interval == 0:
