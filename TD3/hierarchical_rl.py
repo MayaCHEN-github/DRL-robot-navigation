@@ -548,7 +548,7 @@ class HierarchicalRL:
                 # ====== 触发“纯梯度更新”而不采样环境 ======
                 # 注意：train() 只会从 replay_buffer 采样，不会 reset/step 环境
                 if H_BUF.size() >= max(H_BS, self.batch_train_size) and L_BUF.size() >= max(L_BS, self.batch_train_size):
-                    print(f"进行批量训练 - 高层经验: {H_BUF.size()}, 低层经验: {L_BUF.size()}")
+                    # print(f"进行批量训练 - 高层经验: {H_BUF.size()}, 低层经验: {L_BUF.size()}")
                     # 先准备好智能体（补 logger、进度变量等）
                     self._prepare_sb3_train(self.high_level_agent)
                     self._prepare_sb3_train(self.low_level_agent)
