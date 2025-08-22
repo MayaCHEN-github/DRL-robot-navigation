@@ -653,7 +653,7 @@ class HierarchicalRL:
                 episode_timesteps += 1
                 timestep += 1
                 pbar.update(1)
-                pbar.set_postfix({{"回合": episode_count, "当前奖励": f"{episode_reward:.2f}"}})
+                pbar.set_postfix({"回合": episode_count, "当前奖励": f"{episode_reward:.2f}"})
 
                 # 评估 + 定期手动保存（原先的 CheckpointCallback 依赖 learn）
                 if timestep % self.eval_freq == 0:
