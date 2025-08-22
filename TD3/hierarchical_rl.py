@@ -572,7 +572,7 @@ class HierarchicalRL:
                         self.high_level_agent.train(batch_size=self.H_BS, gradient_steps=1)
 
                     # 低级智能体的更新条件：只要缓冲区足够大
-                    if len(L_BUF) > self.learn_starts:
+                    if L_BUF.size() > self.learn_starts:
                         self.low_level_agent.train(batch_size=self.L_BS, gradient_steps=1)
 
                     # 状态转移
@@ -588,9 +588,9 @@ class HierarchicalRL:
                 if done:
                     # 这里简化处理，实际应该找到该回合的所有经验并更新
                     # 为了简单，我们只更新最后一条经验的奖励
-                    if len(H_BUF) > 0:
-                        # 获取最后一条经验
-                        last_idx = len(H_BUF) - 1
+                    if H_BUF.size() > 0:
+                        # 确保last_idx是有效的
+                        last_idx = H_BUF.size() - 1
                         # 更新奖励为回合总奖励
                         H_BUF.rewards[last_idx] = episode_reward
 
