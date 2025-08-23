@@ -49,7 +49,7 @@ class HierarchicalRL:
         use_per = False
         """初始化HRL Agent"""
         # CUDA使用设置
-        self.device = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cpu")  # 强制使用CPU，不使用GPU
         print(f"使用设备: {self.device}")
 
         # 环境参数
@@ -291,14 +291,14 @@ class HierarchicalRL:
             tensorboard_log="./logs/low_level_td3",  # 日志保存路径
             learning_rate=1e-4,  # 学习率
             buffer_size=1_000_000,  # 经验回放缓冲区大小
-            batch_size=40,  # 批量大小
+            batch_size=40,  # 与velodyne版本一致
             tau=0.005,  # 目标网络更新系数
-            gamma=0.99999,  # 折扣因子，接近1表示重视未来奖励
+            gamma=0.99999,  # 与velodyne版本一致
             train_freq=1,  # 训练频率
             gradient_steps=1,  # 每次训练的梯度步数
             policy_delay=2,  # 策略更新延迟
-            target_policy_noise=self.noise_start,  # 目标策略噪声
-            target_noise_clip=0.5,  # 目标噪声裁剪
+            target_policy_noise=0.2,  # 目标策略噪声
+            target_noise_clip=0.5,  # 噪声裁剪
             device=self.device  # 计算设备
         )
         print("低层TD3智能体初始化完成!")

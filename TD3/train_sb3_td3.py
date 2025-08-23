@@ -23,15 +23,10 @@ class EvaluationCallback(BaseCallback):
 
 
 def main():
-    # 检查cuda是否可用
-    print("=== CUDA检测 ===")
-    print(f"PyTorch版本: {torch.__version__}")
-    if torch.cuda.is_available():
-        print(f"CUDA可用: {torch.cuda.is_available()}")
-        device = "cuda"
-    else:
-        print("⚠️  CUDA不可用, 将使用CPU")
-        device = "cpu"
+    # 强制使用CPU
+    print("=== 设备设置 ===")
+    device = "cpu"
+    print(f"已设置使用CPU进行计算")
     print("=" * 20)
 
     # 环境
@@ -89,8 +84,8 @@ def main():
     # 正式训练（可按需继续）
     user_input = input("程序运行正常！是否继续训练更多步数？(y/n): ")
     if user_input.lower() == "y":
-        print("=== 第二阶段：正式训练（245000步，延续同一模型与时间轴）===")
-        model.learn(total_timesteps=245_000, progress_bar=True, callback=[checkpoint_callback, eval_callback], reset_num_timesteps=False)
+        print("=== 第二阶段：正式训练（4,995,000步，延续同一模型与时间轴）===")
+        model.learn(total_timesteps=4_995_000, progress_bar=True, callback=[checkpoint_callback, eval_callback], reset_num_timesteps=False)
         print("✅ 训练完成！")
     else:
         print("训练已停止。")
