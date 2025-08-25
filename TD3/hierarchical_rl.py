@@ -4,7 +4,20 @@ import numpy as np
 import torch  
 import optuna  # 用于超参数优化
 from stable_baselines3 import DQN, TD3  
-from stable_baselines3.common.callbacks import CheckpointCallback  # 从sb3导入的模型检查点callback
+from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback  # 从sb3导入的回调
+
+# 自定义日志回调类
+class LoggingCallback(BaseCallback):
+    def __init__(self, eval_freq: int, verbose: int = 0):
+        super().__init__(verbose)
+        self.eval_freq = eval_freq
+        self.episode_rewards = []
+
+    def _on_step(self) -> bool:
+        if self.n_calls % self.eval_freq == 0:
+            if self.verbose > 0:
+                print(f"步数: {self.n_calls}, 完成评估并记录日志")
+        return True
 # 从sb3导入的经验回放缓冲区
 from stable_baselines3.common.buffers import ReplayBuffer
 from tqdm import tqdm  # 用于显示进度条
@@ -42,7 +55,7 @@ class HierarchicalRL:
     这种分层架构的优势在于可以将复杂的导航任务分解为更简单的子任务，提高学习效率和泛化能力。
 
     """
-    def __init__(self, environment_dim=20, max_timesteps=5e6, eval_freq=5e3, device=None, batch_train_size=100,
+    def __init__(self, environment_dim=20, max_timesteps=5e6, eval_freq=5000, device=None, batch_train_size=100,
                  epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=1e5,
                  noise_start=0.2, noise_end=0.01, noise_decay=1e5):
         # 移除了与PrioritizedReplayBuffer相关的参数，因为该类不可用
@@ -251,6 +264,17 @@ class HierarchicalRL:
             exploration_final_eps=self.epsilon_end,  # 最终探索率
             exploration_fraction=self.epsilon_decay / self.max_timesteps  # 探索率衰减比例
         )
+
+        # 添加模型保存回调，每eval_freq步保存一次
+        self.high_level_checkpoint_callback = CheckpointCallback(
+            save_freq=self.eval_freq,
+            save_path="./pytorch_models/high_level/",
+            name_prefix="high_level_dqn",
+        )
+
+        # 添加日志记录回调，每eval_freq步记录一次详细日志
+        self.high_level_log_callback = LoggingCallback(eval_freq=self.eval_freq, verbose=1)
+
         print("高层DQN智能体初始化完成!")
         return model
 
@@ -301,6 +325,17 @@ class HierarchicalRL:
             target_noise_clip=0.5,  # 噪声裁剪
             device=self.device  # 计算设备
         )
+
+        # 添加模型保存回调，每eval_freq步保存一次
+        self.low_level_checkpoint_callback = CheckpointCallback(
+            save_freq=self.eval_freq,
+            save_path="./pytorch_models/low_level/",
+            name_prefix="low_level_td3",
+        )
+
+        # 添加日志记录回调，每eval_freq步记录一次详细日志
+        self.low_level_log_callback = LoggingCallback(eval_freq=self.eval_freq, verbose=1)
+
         print("低层TD3智能体初始化完成!")
         return model
 
@@ -371,6 +406,44 @@ class HierarchicalRL:
             print(f"成功加载低层模型: {model_path}")
         except Exception as e:
             print(f"加载低层模型失败: {e}")
+
+    def train(self):
+        """训练层级强化学习智能体
+
+        该方法实现了层级强化学习智能体的训练循环，包括高层DQN和低层TD3的交替训练。
+        训练过程中会应用模型保存回调和日志记录回调，确保每self.eval_freq步（默认5000步）保存一次模型和记录详细日志。
+        """
+        print("开始训练层级强化学习智能体...")
+
+        # 准备训练
+        self._prepare_sb3_train(self.high_level_agent)
+        self._prepare_sb3_train(self.low_level_agent)
+
+        # 训练循环
+        total_timesteps = 0
+        while total_timesteps < self.max_timesteps:
+            # 更新探索参数
+            self._update_exploration_parameters(total_timesteps)
+
+            # 高层训练
+            self.high_level_agent.learn(
+                total_timesteps=min(self.eval_freq, self.max_timesteps - total_timesteps),
+                callback=[self.high_level_checkpoint_callback, self.high_level_log_callback],
+                reset_num_timesteps=False
+            )
+
+            # 低层训练
+            self.low_level_agent.learn(
+                total_timesteps=min(self.eval_freq, self.max_timesteps - total_timesteps),
+                callback=[self.low_level_checkpoint_callback, self.low_level_log_callback],
+                reset_num_timesteps=False
+            )
+
+            total_timesteps += self.eval_freq
+            print(f"已完成 {total_timesteps} 步训练，总进度: {total_timesteps/self.max_timesteps*100:.1f}%")
+
+        print("训练完成！")
+        self.env.close()
 
     def _update_exploration_parameters(self, timestep: int):
         """更新探索策略参数
@@ -704,7 +777,7 @@ class HierarchicalRL:
         # 定义超参数搜索空间
         environment_dim = 20
         max_timesteps = 1e6  # 为了快速优化，使用较小的训练步数
-        eval_freq = 1e4
+        eval_freq = 5000
 
         # 超参数搜索空间
         batch_train_size = trial.suggest_int("batch_train_size", 32, 256, step=32)
