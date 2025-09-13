@@ -793,7 +793,7 @@ class HierarchicalRL:
         """
         # 定义超参数搜索空间
         environment_dim = 20
-        max_timesteps = 1e6  # 为了快速优化，使用较小的训练步数
+        max_timesteps = 1e6  # 为了快速优化，使用较小的训练步数 
         eval_freq = 5000
 
         # 超参数搜索空间
