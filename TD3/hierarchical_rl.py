@@ -643,6 +643,28 @@ class HierarchicalRL:
                     pbar.update(1)
                     pbar.set_postfix({"回合": episode_count, "当前奖励": f"{episode_reward:.2f}"})
 
+                    # 调试信息：每100步打印一次timestep
+                    if timestep % 100 == 0:
+                        print(f"\n调试: timestep={timestep}, eval_freq={self.eval_freq}, 余数={timestep % self.eval_freq}")
+
+                    # 评估 + 定期手动保存
+                    if timestep % self.eval_freq == 0:
+                        print(f"\n=== 触发评估和保存 (timestep={timestep}, eval_freq={self.eval_freq}) ===")
+                        try:
+                            eval_reward = self.evaluate()
+                            evaluations.append(eval_reward)
+                            np.save("./results/hierarchical_rl_evaluations.npy", evaluations)
+                            # 确保目录存在
+                            os.makedirs("./pytorch_models/high_level", exist_ok=True)
+                            os.makedirs("./pytorch_models/low_level", exist_ok=True)
+                            # 保存模型（需要完整的文件路径）
+                            self.high_level_agent.save(f"./pytorch_models/high_level/ckpt_{timestep}")
+                            self.low_level_agent.save(f"./pytorch_models/low_level/ckpt_{timestep}")
+                            print(f"已保存模型检查点: timestep={timestep}")
+                        except Exception as e:
+                            print(f"评估或保存过程中出现错误: {e}")
+                            # 即使评估失败，也继续训练
+
                 # 回合结束时更新高层经验的奖励值
                 if done:
                     # 这里简化处理，实际应该找到该回合的所有经验并更新
@@ -653,21 +675,20 @@ class HierarchicalRL:
                         # 更新奖励为回合总奖励
                         H_BUF.rewards[last_idx] = episode_reward
 
+                    # ------- 回合结束后，用"剩余经验"再多做一些梯度步 -------
+                    if H_BUF.size() > 0 or L_BUF.size() > 0:
+                        print(f"回合结束，训练剩余经验 - 高层: {H_BUF.size()}, 低层: {L_BUF.size()}")
+                        
+                        # 仅当样本 >= batch_size 才训练，避免 SB3 采样报错
+                        if H_BUF.size() >= self.H_BS:
+                            steps_h = max(1, H_BUF.size() // 2)
+                            self._prepare_sb3_train(self.high_level_agent)
+                            self.high_level_agent.train(gradient_steps=steps_h, batch_size=self.H_BS)
 
-            # ------- 回合结束后，用“剩余经验”再多做一些梯度步 -------
-            if H_BUF.size() > 0 or L_BUF.size() > 0:
-                print(f"回合结束，训练剩余经验 - 高层: {H_BUF.size()}, 低层: {L_BUF.size()}")
-                
-                # 仅当样本 >= batch_size 才训练，避免 SB3 采样报错
-                if H_BUF.size() >= self.H_BS:
-                    steps_h = max(1, H_BUF.size() // 2)
-                    self._prepare_sb3_train(self.high_level_agent)
-                    self.high_level_agent.train(gradient_steps=steps_h, batch_size=self.H_BS)
-
-                if L_BUF.size() >= self.L_BS:
-                    steps_l = max(1, L_BUF.size() // 2)
-                    self._prepare_sb3_train(self.low_level_agent)
-                    self.low_level_agent.train(gradient_steps=steps_l, batch_size=self.L_BS)
+                        if L_BUF.size() >= self.L_BS:
+                            steps_l = max(1, L_BUF.size() // 2)
+                            self._prepare_sb3_train(self.low_level_agent)
+                            self.low_level_agent.train(gradient_steps=steps_l, batch_size=self.L_BS)
 
             # 日志
             if episode_count % log_interval == 0:
