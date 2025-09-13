@@ -591,6 +591,10 @@ class HierarchicalRL:
                 episode_count += 1
                 reset_result = self.env.reset()
                 state = reset_result[0] if isinstance(reset_result, tuple) else reset_result
+                # 确保 state 是 numpy array
+                if isinstance(state, tuple):
+                    state = state[0]
+                state = np.array(state, dtype=np.float32)
                 done = False
                 episode_reward = 0.0
                 episode_timesteps = 0
@@ -612,6 +616,10 @@ class HierarchicalRL:
 
                     # 与 Gazebo 真正交互的一步
                     next_state, env_reward, terminated, truncated, info = self.env.step(low_level_action)
+                    # 确保 next_state 是 numpy array
+                    if isinstance(next_state, tuple):
+                        next_state = next_state[0]
+                    next_state = np.array(next_state, dtype=np.float32)
                     done = terminated or truncated
                     target = info.get('target_reached', False) if info else False
 
@@ -893,6 +901,10 @@ class HierarchicalRL:
         for episode in range(eval_episodes):
             reset_result = self.env.reset()
             state = reset_result[0] if isinstance(reset_result, tuple) else reset_result
+            # 确保 state 是 numpy array
+            if isinstance(state, tuple):
+                state = state[0]
+            state = np.array(state, dtype=np.float32)
             done = False
             episode_reward = 0
             episode_steps = 0
@@ -912,8 +924,10 @@ class HierarchicalRL:
                 next_state, reward, terminated, truncated, info = self.env.step(low_level_action)
                 done = terminated or truncated
 
-                # 更新状态
-                state = next_state
+                # 更新状态 - 确保 next_state 是 numpy array
+                if isinstance(next_state, tuple):
+                    next_state = next_state[0]
+                state = np.array(next_state, dtype=np.float32)
                 episode_reward += reward
                 episode_steps += 1
                 total_steps += 1
