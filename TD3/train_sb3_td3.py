@@ -7,9 +7,9 @@ from gym_wrapper import VelodyneGymWrapper
 
 
 class EvaluationCallback(BaseCallback):
-    """评估回调: 每5000步打印一次提示"""
+    """评估回调: 每1000步打印一次提示"""
 
-    def __init__(self, eval_freq: int = 5000, verbose: int = 1):
+    def __init__(self, eval_freq: int = 1000, verbose: int = 1):
         super().__init__(verbose)
         self.eval_freq = eval_freq
         self.last_eval = 0
@@ -40,7 +40,7 @@ def main():
 
     # TD3 模型（偏向动作平滑与精细控制）
     print("正在创建TD3模型...")
-    eval_freq = 5_000
+    eval_freq = 1_000
     # 添加探索噪声衰减参数
     expl_noise = 1.0  # 初始探索噪声
     expl_decay_steps = 500_000  # 噪声衰减步数
@@ -84,8 +84,8 @@ def main():
     # 正式训练（可按需继续）
     user_input = input("程序运行正常！是否继续训练更多步数？(y/n): ")
     if user_input.lower() == "y":
-        print("=== 第二阶段：正式训练（4,995,000步，延续同一模型与时间轴）===")
-        model.learn(total_timesteps=4_995_000, progress_bar=True, callback=[checkpoint_callback, eval_callback], reset_num_timesteps=False)
+        print("=== 第二阶段：正式训练（1,995,000步，延续同一模型与时间轴）===")
+        model.learn(total_timesteps=1_995_000, progress_bar=True, callback=[checkpoint_callback, eval_callback], reset_num_timesteps=False)
         print("✅ 训练完成！")
     else:
         print("训练已停止。")

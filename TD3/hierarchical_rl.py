@@ -55,7 +55,7 @@ class HierarchicalRL:
     这种分层架构的优势在于可以将复杂的导航任务分解为更简单的子任务，提高学习效率和泛化能力。
 
     """
-    def __init__(self, environment_dim=20, max_timesteps=5e6, eval_freq=5000, device=None, batch_train_size=100,
+    def __init__(self, environment_dim=20, max_timesteps=2e6, eval_freq=1000, device=None, batch_train_size=100,
                  epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=1e5,
                  noise_start=0.2, noise_end=0.01, noise_decay=1e5):
         # 移除了与PrioritizedReplayBuffer相关的参数，因为该类不可用
@@ -582,7 +582,12 @@ class HierarchicalRL:
 
         # 计算总回合数
         total_episodes = int(self.max_timesteps / self.max_ep) + 1
-        print(f"总回合数: {total_episodes}")
+        print(f"训练设置:")
+        print(f"  - 总时间步数: {int(self.max_timesteps):,}")
+        print(f"  - 总回合数: {total_episodes}")
+        print(f"  - 保存频率: 每 {self.eval_freq} 步保存一次")
+        print(f"  - 预计保存次数: {int(self.max_timesteps / self.eval_freq)} 次")
+        print(f"  - 调试信息: max_timesteps={self.max_timesteps}, eval_freq={self.eval_freq}")
 
         # 创建进度条
         with tqdm(total=self.max_timesteps, desc="训练进度", position=1, leave=True, dynamic_ncols=True) as pbar:
@@ -748,6 +753,7 @@ class HierarchicalRL:
 
                 # 评估 + 定期手动保存（原先的 CheckpointCallback 依赖 learn）
                 if timestep % self.eval_freq == 0:
+                    print(f"\n=== 触发评估和保存 (timestep={timestep}, eval_freq={self.eval_freq}) ===")
                     eval_reward = self.evaluate()
                     evaluations.append(eval_reward)
                     np.save("./results/hierarchical_rl_evaluations.npy", evaluations)
@@ -801,8 +807,8 @@ class HierarchicalRL:
         """
         # 定义超参数搜索空间
         environment_dim = 20
-        max_timesteps = 1e6  # 为了快速优化，使用较小的训练步数 
-        eval_freq = 5000
+        max_timesteps = 1e6  # 为了快速优化，使用较小的训练步数
+        eval_freq = 1000
 
         # 超参数搜索空间
         batch_train_size = trial.suggest_int("batch_train_size", 32, 256, step=32)
@@ -1010,12 +1016,12 @@ def main(optimize=False):
         # 使用最佳参数创建实例并训练
         hierarchical_agent = HierarchicalRL(
             environment_dim=20,
-            max_timesteps=5e6,
+            max_timesteps=2e6,
             **valid_params
         )
     else:
         # 直接训练
-        hierarchical_agent = HierarchicalRL(environment_dim=20, max_timesteps=5e6)
+        hierarchical_agent = HierarchicalRL(environment_dim=20, max_timesteps=2e6)
 
     # 开始训练
     # —— 安装信号处理：Ctrl+C / kill 都会先清理再退出
