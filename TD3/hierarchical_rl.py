@@ -414,43 +414,6 @@ class HierarchicalRL:
         except Exception as e:
             print(f"加载低层模型失败: {e}")
 
-    def train(self):
-        """训练层级强化学习智能体
-
-        该方法实现了层级强化学习智能体的训练循环，包括高层DQN和低层TD3的交替训练。
-        训练过程中会应用模型保存回调和日志记录回调，确保每self.eval_freq步（默认5000步）保存一次模型和记录详细日志。
-        """
-        print("开始训练层级强化学习智能体...")
-
-        # 准备训练
-        self._prepare_sb3_train(self.high_level_agent)
-        self._prepare_sb3_train(self.low_level_agent)
-
-        # 训练循环
-        total_timesteps = 0
-        while total_timesteps < self.max_timesteps:
-            # 更新探索参数
-            self._update_exploration_parameters(total_timesteps)
-
-            # 高层训练
-            self.high_level_agent.learn(
-                total_timesteps=min(self.eval_freq, self.max_timesteps - total_timesteps),
-                callback=[self.high_level_checkpoint_callback, self.high_level_log_callback],
-                reset_num_timesteps=False
-            )
-
-            # 低层训练
-            self.low_level_agent.learn(
-                total_timesteps=min(self.eval_freq, self.max_timesteps - total_timesteps),
-                callback=[self.low_level_checkpoint_callback, self.low_level_log_callback],
-                reset_num_timesteps=False
-            )
-
-            total_timesteps += self.eval_freq
-            print(f"已完成 {total_timesteps} 步训练，总进度: {total_timesteps/self.max_timesteps*100:.1f}%")
-
-        print("训练完成！")
-        self.env.close()
 
     def _update_exploration_parameters(self, timestep: int):
         """更新探索策略参数
@@ -690,80 +653,6 @@ class HierarchicalRL:
                         # 更新奖励为回合总奖励
                         H_BUF.rewards[last_idx] = episode_reward
 
-                # ===== 低层：连续动作（把子目标拼进观测）=====
-                sub_goal_state = np.append(state, [direction, distance])
-                low_level_action = self.low_level_agent.predict(sub_goal_state, deterministic=False)[0]
-
-                # 与 Gazebo 真正交互的一步
-                next_state, reward, terminated, truncated, info = self.env.step(low_level_action)
-
-                # 规整 done（terminated 或 truncated）
-                if isinstance(terminated, np.ndarray):
-                    terminated = bool(np.any(terminated))
-                else:
-                    terminated = bool(terminated)
-                if isinstance(truncated, np.ndarray):
-                    truncated = bool(np.any(truncated))
-                else:
-                    truncated = bool(truncated)
-                done = terminated or truncated
-                target = info.get('target_reached', False)
-
-                # 奖励（沿用你已有的函数）
-                high_level_reward, low_level_reward = self._calculate_rewards(
-                    state, next_state, high_level_action, distance,
-                    done, target, episode_timesteps, reward, info
-                )
-
-                # ====== 往“各自模型的内部 buffer”里 add ======
-                # 高层（obs_dim）
-                obs_h      = state.reshape(1, -1)
-                next_obs_h = next_state.reshape(1, -1)
-                act_h      = np.array([[high_level_action]], dtype=np.int64)
-                rew_h      = np.array([high_level_reward], dtype=np.float32)
-                done_h     = np.array([bool(done)], dtype=np.bool_)
-                H_BUF.add(obs_h, next_obs_h, act_h, rew_h, done_h, infos=[{}])
-
-                # 低层（obs_dim + 2）
-                obs_l      = sub_goal_state.reshape(1, -1)
-                next_obs_l = np.append(next_state, [direction, distance]).reshape(1, -1)
-                act_l      = np.array(low_level_action, dtype=np.float32).reshape(1, -1)
-                rew_l      = np.array([low_level_reward], dtype=np.float32)
-                done_l     = np.array([bool(done)], dtype=np.bool_)
-                L_BUF.add(obs_l, next_obs_l, act_l, rew_l, done_l, infos=[{}])
-
-                # ====== 触发“纯梯度更新”而不采样环境 ======
-                # 注意：train() 只会从 replay_buffer 采样，不会 reset/step 环境
-                if H_BUF.size() >= max(self.H_BS, self.batch_train_size) and L_BUF.size() >= max(self.L_BS, self.batch_train_size):
-                    # print(f"进行批量训练 - 高层经验: {H_BUF.size()}, 低层经验: {L_BUF.size()}")
-                    # 先准备好智能体（补 logger、进度变量等）
-                    self._prepare_sb3_train(self.high_level_agent)
-                    self._prepare_sb3_train(self.low_level_agent)
-                    # 再做纯梯度更新（不触发环境交互）
-                    self.high_level_agent.train(gradient_steps=self.batch_train_size, batch_size=self.H_BS)
-                    self.low_level_agent.train(gradient_steps=self.batch_train_size, batch_size=self.L_BS)
-
-                # 滚动
-                state = next_state
-                episode_reward += reward
-                episode_timesteps += 1
-                timestep += 1
-                pbar.update(1)
-                pbar.set_postfix({"回合": episode_count, "当前奖励": f"{episode_reward:.2f}"})
-
-                # 评估 + 定期手动保存（原先的 CheckpointCallback 依赖 learn）
-                if timestep % self.eval_freq == 0:
-                    print(f"\n=== 触发评估和保存 (timestep={timestep}, eval_freq={self.eval_freq}) ===")
-                    eval_reward = self.evaluate()
-                    evaluations.append(eval_reward)
-                    np.save("./results/hierarchical_rl_evaluations.npy", evaluations)
-                    # 确保目录存在
-                    os.makedirs("./pytorch_models/high_level", exist_ok=True)
-                    os.makedirs("./pytorch_models/low_level", exist_ok=True)
-                    # 保存模型（需要完整的文件路径）
-                    self.high_level_agent.save(f"./pytorch_models/high_level/ckpt_{timestep}")
-                    self.low_level_agent.save(f"./pytorch_models/low_level/ckpt_{timestep}")
-                    print(f"已保存模型检查点: timestep={timestep}")
 
             # ------- 回合结束后，用“剩余经验”再多做一些梯度步 -------
             if H_BUF.size() > 0 or L_BUF.size() > 0:
