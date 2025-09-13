@@ -55,7 +55,7 @@ class HierarchicalRL:
     这种分层架构的优势在于可以将复杂的导航任务分解为更简单的子任务，提高学习效率和泛化能力。
 
     """
-    def __init__(self, environment_dim=20, max_timesteps=2e6, eval_freq=1000, device=None, batch_train_size=100,
+    def __init__(self, environment_dim=20, max_timesteps=2e6, eval_freq=5000, device=None, batch_train_size=100,
                  epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=1e5,
                  noise_start=0.2, noise_end=0.01, noise_decay=1e5):
         # 移除了与PrioritizedReplayBuffer相关的参数，因为该类不可用
@@ -643,15 +643,21 @@ class HierarchicalRL:
                     pbar.update(1)
                     pbar.set_postfix({"回合": episode_count, "当前奖励": f"{episode_reward:.2f}"})
 
-                    # 调试信息：每100步打印一次timestep
-                    if timestep % 100 == 0:
-                        print(f"\n调试: timestep={timestep}, eval_freq={self.eval_freq}, 余数={timestep % self.eval_freq}")
-
                     # 评估 + 定期手动保存
                     if timestep % self.eval_freq == 0:
                         print(f"\n=== 触发评估和保存 (timestep={timestep}, eval_freq={self.eval_freq}) ===")
                         try:
-                            eval_reward = self.evaluate()
+                            # 根据训练进度动态调整评估回合数
+                            progress = timestep / self.max_timesteps
+                            if progress < 0.1:  # 前10%的训练
+                                eval_episodes = 3
+                            elif progress < 0.5:  # 10%-50%的训练
+                                eval_episodes = 5
+                            else:  # 50%以后的训练
+                                eval_episodes = 10
+                            
+                            print(f"评估回合数: {eval_episodes} (训练进度: {progress:.1%})")
+                            eval_reward = self.evaluate(eval_episodes=eval_episodes)
                             evaluations.append(eval_reward)
                             np.save("./results/hierarchical_rl_evaluations.npy", evaluations)
                             # 确保目录存在
@@ -677,8 +683,6 @@ class HierarchicalRL:
 
                     # ------- 回合结束后，用"剩余经验"再多做一些梯度步 -------
                     if H_BUF.size() > 0 or L_BUF.size() > 0:
-                        print(f"回合结束，训练剩余经验 - 高层: {H_BUF.size()}, 低层: {L_BUF.size()}")
-                        
                         # 仅当样本 >= batch_size 才训练，避免 SB3 采样报错
                         if H_BUF.size() >= self.H_BS:
                             steps_h = max(1, H_BUF.size() // 2)
@@ -690,9 +694,6 @@ class HierarchicalRL:
                             self._prepare_sb3_train(self.low_level_agent)
                             self.low_level_agent.train(gradient_steps=steps_l, batch_size=self.L_BS)
 
-            # 日志
-            if episode_count % log_interval == 0:
-                print(f"回合 {episode_count} 完成，总步数: {timestep}, 奖励: {episode_reward:.2f}")
 
         # 最终保存
         os.makedirs("./pytorch_models/high_level", exist_ok=True)

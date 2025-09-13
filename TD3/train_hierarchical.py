@@ -9,7 +9,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='训练层级强化学习算法')
     parser.add_argument('--environment_dim', type=int, default=20, help='环境维度（激光雷达数据维度）')
     parser.add_argument('--max_timesteps', type=int, default=2000000, help='最大训练步数')
-    parser.add_argument('--eval_freq', type=int, default=1000, help='评估频率')
+    parser.add_argument('--eval_freq', type=int, default=5000, help='评估频率')
     parser.add_argument('--device', type=str, default=None, help='使用的设备（cuda或cpu）')
     parser.add_argument('--load_high_level', type=str, default=None, help='加载高层模型的路径')
     parser.add_argument('--load_low_level', type=str, default=None, help='加载低层模型的路径')
