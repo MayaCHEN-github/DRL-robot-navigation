@@ -12,8 +12,8 @@ class EvaluationWrapper(VelodyneGymWrapper):
       - trajectory_smoothness: 轨迹平滑度
     """
     
-    def __init__(self, launchfile, environment_dim, action_type="continuous"):
-        super().__init__(launchfile, environment_dim, action_type)
+    def __init__(self, launchfile, environment_dim, action_type="continuous", device=None):
+        super().__init__(launchfile, environment_dim, action_type, device)
         self.reset_evaluation_metrics() # 初始化metrics
     
     def step(self, action):
@@ -165,13 +165,14 @@ def evaluate_over_episodes(
     max_steps=500,
     action_type="continuous",
     deterministic=True,
+    device=None,
 ):
     """
     多次运行评估回合并聚合指标（不依赖 SB3 的 VecEnv）。
     - agent: 支持 SB3 的 model（带 predict）或可调用函数 f(obs)->action
     - 返回: (summary, episode_metrics)
     """
-    env = EvaluationWrapper(launchfile, environment_dim, action_type)
+    env = EvaluationWrapper(launchfile, environment_dim, action_type, device)
     episode_metrics = []
     success_episodes = 0
     collision_episodes = 0

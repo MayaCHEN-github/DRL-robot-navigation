@@ -1,5 +1,6 @@
 # 导入必要的库
 import os  # 用于文件和目录操作
+import time  # 用于时间戳
 import numpy as np  
 import torch  
 import optuna  # 用于超参数优化
@@ -657,6 +658,9 @@ class HierarchicalRL:
                                 eval_episodes = 10
                             
                             print(f"评估回合数: {eval_episodes} (训练进度: {progress:.1%})")
+                            # 使用详细评估
+                            detailed_summary = self.evaluate_detailed(eval_episodes=eval_episodes)
+                            # 也进行基础评估以保持向后兼容
                             eval_reward = self.evaluate(eval_episodes=eval_episodes)
                             evaluations.append(eval_reward)
                             np.save("./results/hierarchical_rl_evaluations.npy", evaluations)
@@ -867,7 +871,109 @@ class HierarchicalRL:
         print(f"评估完成 - 平均奖励: {avg_reward:.2f}, 平均步数: {avg_steps:.1f}")
         print(f"成功率: {success_rate:.2%}, 碰撞率: {collision_rate:.2%}")
 
+        # 保存详细评估结果到文件
+        os.makedirs("./results", exist_ok=True)
+        evaluation_data = {
+            'avg_reward': avg_reward,
+            'avg_steps': avg_steps,
+            'success_rate': success_rate,
+            'collision_rate': collision_rate,
+            'episodes': eval_episodes
+        }
+        np.save("./results/evaluation_metrics.npy", evaluation_data)
+
         return avg_reward
+    
+    def evaluate_detailed(self, eval_episodes=10):
+        """使用gym_evaluation.py中的详细评估指标
+        
+        该方法使用gym_evaluation.py中定义的详细评估指标，包括：
+        - 成功率 (success_rate)
+        - 路径效率 (path_efficiency) 
+        - 轨迹平滑度 (trajectory_smoothness)
+        - 时间成本 (time_cost)
+        - 碰撞率 (collision_rate)
+        
+        参数:
+            eval_episodes: 评估的回合数
+            
+        返回:
+            dict: 详细评估结果
+        """
+        from gym_evaluation import evaluate_over_episodes
+        
+        print(f"开始详细评估，共 {eval_episodes} 个回合...")
+        
+        # 创建一个包装函数，将层级RL的决策过程封装起来
+        def hierarchical_agent_predict(obs):
+            # 确保obs是numpy array
+            if isinstance(obs, tuple):
+                obs = obs[0]
+            obs = np.array(obs, dtype=np.float32)
+            
+            # 高层决策 (使用确定性策略)
+            high_level_action = self.high_level_agent.predict(obs, deterministic=True)[0]
+            direction = high_level_action % 20
+            distance = (high_level_action // 20) * 0.5 + 0.5
+            
+            # 低层执行 (使用确定性策略)
+            sub_goal_state = np.append(obs, [direction, distance])
+            low_level_action = self.low_level_agent.predict(sub_goal_state, deterministic=True)[0]
+            
+            return low_level_action
+        
+        # 使用gym_evaluation.py中的详细评估
+        summary, episode_metrics = evaluate_over_episodes(
+            agent=hierarchical_agent_predict,
+            launchfile="multi_robot_scenario.launch",
+            environment_dim=self.environment_dim,
+            num_episodes=eval_episodes,
+            max_steps=self.max_ep,
+            action_type="continuous",
+            deterministic=True,
+            device=self.device
+        )
+        
+        # 打印详细评估结果
+        print(f"详细评估完成:")
+        print(f"  成功率: {summary['success_rate']:.2%}")
+        print(f"  碰撞率: {summary['collision_rate']:.2%}")
+        print(f"  平均时间成本: {summary['avg_time_cost']:.2f}秒")
+        print(f"  平均路径效率: {summary['avg_path_efficiency']:.2%}")
+        print(f"  平均轨迹平滑度: {summary['avg_trajectory_smoothness']:.2%}")
+        
+        # 保存详细评估结果
+        os.makedirs("./results", exist_ok=True)
+        detailed_evaluation_data = {
+            'summary': summary,
+            'episode_metrics': episode_metrics,
+            'timestamp': time.time()
+        }
+        np.save("./results/detailed_evaluation_metrics.npy", detailed_evaluation_data)
+        
+        # 记录到TensorBoard
+        self._log_evaluation_to_tensorboard(summary)
+        
+        return summary
+    
+    def _log_evaluation_to_tensorboard(self, summary):
+        """将评估指标记录到TensorBoard"""
+        try:
+            # 为高层和低层智能体都记录评估指标
+            for agent_name, agent in [("high_level", self.high_level_agent), ("low_level", self.low_level_agent)]:
+                if hasattr(agent, '_logger') and agent._logger is not None:
+                    # 记录评估指标
+                    agent._logger.record("evaluation/success_rate", summary['success_rate'])
+                    agent._logger.record("evaluation/collision_rate", summary['collision_rate'])
+                    agent._logger.record("evaluation/avg_time_cost", summary['avg_time_cost'])
+                    agent._logger.record("evaluation/avg_path_efficiency", summary['avg_path_efficiency'])
+                    agent._logger.record("evaluation/avg_trajectory_smoothness", summary['avg_trajectory_smoothness'])
+                    agent._logger.record("evaluation/episodes", summary['episodes'])
+                    
+                    # 记录到TensorBoard
+                    agent._logger.dump(step=agent.num_timesteps)
+        except Exception as e:
+            print(f"记录评估指标到TensorBoard时出错: {e}")
     
     def _cleanup_gazebo_ros(self):
         """
