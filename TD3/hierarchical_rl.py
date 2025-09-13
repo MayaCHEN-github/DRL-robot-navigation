@@ -344,10 +344,17 @@ class HierarchicalRL:
 
         创建用于存储训练结果、模型权重的目录结构，确保训练过程中生成的文件有合适的存放位置。如果目录已存在，则不会重复创建。
         """
-        directories = ["./results", "./pytorch_models/high_level", "./pytorch_models/low_level"]
+        directories = [
+            "./results", 
+            "./pytorch_models/high_level", 
+            "./pytorch_models/low_level",
+            "./logs/high_level_dqn",
+            "./logs/low_level_td3"
+        ]
         for dir_path in directories:
             if not os.path.exists(dir_path):
                 os.makedirs(dir_path, exist_ok=True)
+                print(f"创建目录: {dir_path}")
 
     def _prepare_sb3_train(self, agent):
         """
@@ -555,6 +562,9 @@ class HierarchicalRL:
     def train(self, log_interval=1000):
         """分层强化学习训练（外部采样 → 内部 buffer → 仅梯度更新）"""
         print("开始层级强化学习训练...")
+        
+        # 确保所有必要的目录都存在
+        self._create_directories()
 
         self._prepare_sb3_train(self.high_level_agent)
         self._prepare_sb3_train(self.low_level_agent)
@@ -733,8 +743,13 @@ class HierarchicalRL:
                     eval_reward = self.evaluate()
                     evaluations.append(eval_reward)
                     np.save("./results/hierarchical_rl_evaluations.npy", evaluations)
+                    # 确保目录存在
+                    os.makedirs("./pytorch_models/high_level", exist_ok=True)
+                    os.makedirs("./pytorch_models/low_level", exist_ok=True)
+                    # 保存模型（需要完整的文件路径）
                     self.high_level_agent.save(f"./pytorch_models/high_level/ckpt_{timestep}")
                     self.low_level_agent.save(f"./pytorch_models/low_level/ckpt_{timestep}")
+                    print(f"已保存模型检查点: timestep={timestep}")
 
             # ------- 回合结束后，用“剩余经验”再多做一些梯度步 -------
             if H_BUF.size() > 0 or L_BUF.size() > 0:
@@ -756,9 +771,11 @@ class HierarchicalRL:
                 print(f"回合 {episode_count} 完成，总步数: {timestep}, 奖励: {episode_reward:.2f}")
 
         # 最终保存
+        os.makedirs("./pytorch_models/high_level", exist_ok=True)
+        os.makedirs("./pytorch_models/low_level", exist_ok=True)
         self.high_level_agent.save("./pytorch_models/high_level/final_model")
         self.low_level_agent.save("./pytorch_models/low_level/final_model")
-        print("训练完成!")
+        print("训练完成! 最终模型已保存。")
 
     @staticmethod
     def objective(trial: optuna.Trial) -> float:
@@ -874,7 +891,8 @@ class HierarchicalRL:
         self.prev_direction = 0.0
 
         for episode in range(eval_episodes):
-            state = self.env.reset()
+            reset_result = self.env.reset()
+            state = reset_result[0] if isinstance(reset_result, tuple) else reset_result
             done = False
             episode_reward = 0
             episode_steps = 0
