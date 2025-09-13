@@ -658,12 +658,19 @@ class HierarchicalRL:
                                 eval_episodes = 10
                             
                             print(f"评估回合数: {eval_episodes} (训练进度: {progress:.1%})")
-                            # 使用详细评估
-                            detailed_summary = self.evaluate_detailed(eval_episodes=eval_episodes)
-                            # 也进行基础评估以保持向后兼容
-                            eval_reward = self.evaluate(eval_episodes=eval_episodes)
-                            evaluations.append(eval_reward)
-                            np.save("./results/hierarchical_rl_evaluations.npy", evaluations)
+                            try:
+                                # 使用详细评估
+                                detailed_summary = self.evaluate_detailed(eval_episodes=eval_episodes)
+                                # 也进行基础评估以保持向后兼容
+                                eval_reward = self.evaluate(eval_episodes=eval_episodes)
+                                evaluations.append(eval_reward)
+                                np.save("./results/hierarchical_rl_evaluations.npy", evaluations)
+                            except Exception as e:
+                                print(f"评估过程中出现错误: {e}")
+                                print("跳过本次评估，继续训练...")
+                                # 使用默认值
+                                eval_reward = 0.0
+                                evaluations.append(eval_reward)
                             # 确保目录存在
                             os.makedirs("./pytorch_models/high_level", exist_ok=True)
                             os.makedirs("./pytorch_models/low_level", exist_ok=True)
@@ -885,9 +892,10 @@ class HierarchicalRL:
         return avg_reward
     
     def evaluate_detailed(self, eval_episodes=10):
-        """使用gym_evaluation.py中的详细评估指标
+        """使用现有环境进行详细评估（避免环境冲突）
         
-        该方法使用gym_evaluation.py中定义的详细评估指标，包括：
+        该方法使用当前训练环境进行详细评估，避免启动新的Gazebo环境。
+        包括：
         - 成功率 (success_rate)
         - 路径效率 (path_efficiency) 
         - 轨迹平滑度 (trajectory_smoothness)
@@ -900,39 +908,136 @@ class HierarchicalRL:
         返回:
             dict: 详细评估结果
         """
-        from gym_evaluation import evaluate_over_episodes
-        
         print(f"开始详细评估，共 {eval_episodes} 个回合...")
         
-        # 创建一个包装函数，将层级RL的决策过程封装起来
-        def hierarchical_agent_predict(obs):
-            # 确保obs是numpy array
-            if isinstance(obs, tuple):
-                obs = obs[0]
-            obs = np.array(obs, dtype=np.float32)
-            
-            # 高层决策 (使用确定性策略)
-            high_level_action = self.high_level_agent.predict(obs, deterministic=True)[0]
-            direction = high_level_action % 20
-            distance = (high_level_action // 20) * 0.5 + 0.5
-            
-            # 低层执行 (使用确定性策略)
-            sub_goal_state = np.append(obs, [direction, distance])
-            low_level_action = self.low_level_agent.predict(sub_goal_state, deterministic=True)[0]
-            
-            return low_level_action
+        # 使用现有环境进行评估，避免环境冲突
+        episode_metrics = []
+        success_episodes = 0
+        collision_episodes = 0
+        total_time_cost = 0.0
+        total_path_efficiency = 0.0
+        total_trajectory_smoothness = 0.0
         
-        # 使用gym_evaluation.py中的详细评估
-        summary, episode_metrics = evaluate_over_episodes(
-            agent=hierarchical_agent_predict,
-            launchfile="multi_robot_scenario.launch",
-            environment_dim=self.environment_dim,
-            num_episodes=eval_episodes,
-            max_steps=self.max_ep,
-            action_type="continuous",
-            deterministic=True,
-            device=self.device
-        )
+        for episode in range(eval_episodes):
+            print(f"评估回合 {episode+1}/{eval_episodes}")
+            
+            # 重置环境
+            reset_result = self.env.reset()
+            state = reset_result[0] if isinstance(reset_result, tuple) else reset_result
+            if isinstance(state, tuple):
+                state = state[0]
+            state = np.array(state, dtype=np.float32)
+            
+            # 初始化评估指标
+            start_time = time.time()
+            trajectory = []
+            total_distance = 0.0
+            episode_collision = False
+            
+            # 获取起始位置和目标位置
+            if hasattr(self.env, 'gazebo_env'):
+                start_x = self.env.gazebo_env.odom_x
+                start_y = self.env.gazebo_env.odom_y
+                goal_x = self.env.gazebo_env.goal_x
+                goal_y = self.env.gazebo_env.goal_y
+                trajectory.append((start_x, start_y))
+                
+                straight_line_distance = np.linalg.norm([goal_x - start_x, goal_y - start_y])
+            else:
+                # 如果无法获取位置信息，使用默认值
+                start_x = start_y = goal_x = goal_y = 0.0
+                trajectory.append((start_x, start_y))
+                straight_line_distance = 1.0
+            
+            done = False
+            episode_steps = 0
+            self.prev_direction = 0.0
+            
+            while not done and episode_steps < self.max_ep:
+                # 高层决策 (使用确定性策略)
+                high_level_action = self.high_level_agent.predict(state, deterministic=True)[0]
+                direction = high_level_action % 20
+                distance = (high_level_action // 20) * 0.5 + 0.5
+                
+                # 低层执行 (使用确定性策略)
+                sub_goal_state = np.append(state, [direction, distance])
+                low_level_action = self.low_level_agent.predict(sub_goal_state, deterministic=True)[0]
+                
+                # 执行动作
+                next_state, reward, terminated, truncated, info = self.env.step(low_level_action)
+                done = terminated or truncated
+                
+                # 更新状态
+                if isinstance(next_state, tuple):
+                    next_state = next_state[0]
+                state = np.array(next_state, dtype=np.float32)
+                
+                # 记录轨迹
+                if hasattr(self.env, 'gazebo_env'):
+                    current_x = self.env.gazebo_env.odom_x
+                    current_y = self.env.gazebo_env.odom_y
+                    trajectory.append((current_x, current_y))
+                    
+                    # 计算步长
+                    if len(trajectory) > 1:
+                        prev_x, prev_y = trajectory[-2]
+                        step_distance = np.linalg.norm([current_x - prev_x, current_y - prev_y])
+                        total_distance += step_distance
+                
+                # 检查碰撞
+                if reward < -90 and not episode_collision:
+                    episode_collision = True
+                
+                episode_steps += 1
+            
+            # 计算评估指标
+            time_cost = time.time() - start_time
+            total_time_cost += time_cost
+            
+            # 计算成功率
+            if hasattr(self.env, 'gazebo_env'):
+                final_x = self.env.gazebo_env.odom_x
+                final_y = self.env.gazebo_env.odom_y
+                final_distance = np.linalg.norm([goal_x - final_x, goal_y - final_y])
+                success = 1.0 if final_distance < 0.3 else 0.0
+            else:
+                success = 0.0
+            
+            if success >= 0.5:
+                success_episodes += 1
+            
+            if episode_collision:
+                collision_episodes += 1
+            
+            # 计算路径效率
+            if total_distance > 0:
+                path_efficiency = straight_line_distance / total_distance
+            else:
+                path_efficiency = 1.0
+            total_path_efficiency += path_efficiency
+            
+            # 计算轨迹平滑度
+            smoothness = self._calculate_trajectory_smoothness(trajectory)
+            total_trajectory_smoothness += smoothness
+            
+            # 保存回合指标
+            episode_metrics.append({
+                'success_rate': success,
+                'time_cost': time_cost,
+                'path_efficiency': path_efficiency,
+                'trajectory_smoothness': smoothness
+            })
+        
+        # 计算平均指标
+        n = len(episode_metrics) if episode_metrics else 1
+        summary = {
+            'episodes': n,
+            'success_rate': success_episodes / n,
+            'collision_rate': collision_episodes / n,
+            'avg_time_cost': total_time_cost / n,
+            'avg_path_efficiency': total_path_efficiency / n,
+            'avg_trajectory_smoothness': total_trajectory_smoothness / n,
+        }
         
         # 打印详细评估结果
         print(f"详细评估完成:")
@@ -955,6 +1060,60 @@ class HierarchicalRL:
         self._log_evaluation_to_tensorboard(summary)
         
         return summary
+    
+    def _calculate_trajectory_smoothness(self, trajectory):
+        """计算轨迹平滑度（基于轨迹点的曲率变化）"""
+        if len(trajectory) < 3:
+            return 1.0  # 轨迹点太少，认为平滑
+        
+        # 计算轨迹的曲率变化
+        curvature_changes = []
+        for i in range(1, len(trajectory) - 1):
+            p1 = np.array(trajectory[i-1])
+            p2 = np.array(trajectory[i])
+            p3 = np.array(trajectory[i+1])
+            
+            # 计算两个向量的夹角
+            v1 = p2 - p1
+            v2 = p3 - p2
+            
+            if np.linalg.norm(v1) > 0 and np.linalg.norm(v2) > 0:
+                cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+                cos_angle = np.clip(cos_angle, -1, 1)  # 防止数值误差
+                angle = np.arccos(cos_angle)
+                curvature_changes.append(angle)
+        
+        if not curvature_changes:
+            return 1.0
+        
+        # 平滑度 = 1 / (1 + 平均曲率变化)
+        avg_curvature = np.mean(curvature_changes)
+        smoothness = 1.0 / (1.0 + avg_curvature)
+        return smoothness
+    
+    def _cleanup_environment(self):
+        """清理环境，解决冲突问题"""
+        try:
+            print("正在清理环境...")
+            
+            # 1. 关闭当前环境
+            if hasattr(self, 'env') and hasattr(self.env, 'close'):
+                self.env.close()
+            
+            # 2. 清理ROS进程
+            os.system("pkill -9 -f 'gazebo_ros/gzserver|gzserver|roslaunch|rosmaster|rosout|gzclient' 2>/dev/null || true")
+            
+            # 3. 清理Gazebo共享内存
+            os.system("rm -f /dev/shm/gazebo-* /tmp/gazebo* 2>/dev/null || true")
+            
+            # 4. 等待进程完全结束
+            import time
+            time.sleep(2)
+            
+            print("环境清理完成")
+            
+        except Exception as e:
+            print(f"环境清理过程中出现错误: {e}")
     
     def _log_evaluation_to_tensorboard(self, summary):
         """将评估指标记录到TensorBoard"""
