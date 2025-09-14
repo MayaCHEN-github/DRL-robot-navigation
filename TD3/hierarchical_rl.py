@@ -676,12 +676,12 @@ class HierarchicalRL:
                             
                             print(f"评估回合数: {eval_episodes} (训练进度: {progress:.1%})")
                             try:
-                                # 使用详细评估
+                                # 只使用详细评估，不再使用基础评估
                                 detailed_summary = self.evaluate_detailed(eval_episodes=eval_episodes)
-                                # 也进行基础评估以保持向后兼容
-                                eval_reward = self.evaluate(eval_episodes=eval_episodes)
-                                evaluations.append(eval_reward)
-                                np.save("./results/hierarchical_rl_evaluations.npy", evaluations)
+                                # 使用详细评估结果中的平均奖励用于训练过程跟踪
+                                avg_reward = detailed_summary['avg_reward'] if 'avg_reward' in detailed_summary else 0.0
+                                evaluations.append(avg_reward)
+                                # 不再单独保存evaluations，所有评估结果已通过evaluate_detailed保存到logs文件夹
                             except Exception as e:
                                 print(f"评估过程中出现错误: {e}")
                                 print("跳过本次评估，继续训练...")
@@ -778,7 +778,9 @@ class HierarchicalRL:
 
         # 训练一小部分步骤后评估
         agent.train()
-        avg_reward = agent.evaluate(eval_episodes=5)
+        # 使用evaluate_detailed代替evaluate
+        detailed_summary = agent.evaluate_detailed(eval_episodes=5)
+        avg_reward = detailed_summary.get('avg_reward', 0.0)
 
         return avg_reward
 
@@ -823,90 +825,7 @@ class HierarchicalRL:
 
         return study.best_params
 
-    def evaluate(self, eval_episodes=10):
-        """评估训练好的模型性能
 
-        该方法用于评估训练好的层级强化学习模型在测试环境中的表现。评估指标
-        包括平均奖励、成功率和碰撞率，这些指标反映了模型的导航能力和安全性。
-
-        参数:
-            eval_episodes: 评估的回合数
-
-        返回:
-            float: 平均奖励
-        """
-        print(f"开始评估，共 {eval_episodes} 个回合...")
-        total_reward = 0
-        total_steps = 0
-        success_count = 0
-        collision_count = 0
-        # 确保prev_direction已定义
-        self.prev_direction = 0.0
-
-        for episode in range(eval_episodes):
-            reset_result = self.env.reset()
-            state = reset_result[0] if isinstance(reset_result, tuple) else reset_result
-            # 确保 state 是 numpy array
-            if isinstance(state, tuple):
-                state = state[0]
-            state = np.array(state, dtype=np.float32)
-            done = False
-            episode_reward = 0
-            episode_steps = 0
-            self.prev_direction = 0.0  # 重置前一方向
-
-            while not done and episode_steps < self.max_ep:
-                # 高层决策 (使用确定性策略)
-                high_level_action = self.high_level_agent.predict(state, deterministic=True)[0]
-                direction = high_level_action % 20
-                distance = (high_level_action // 20) * 0.5 + 0.5
-
-                # 低层执行 (使用确定性策略)
-                sub_goal_state = np.append(state, [direction, distance])
-                low_level_action = self.low_level_agent.predict(sub_goal_state, deterministic=True)[0]
-
-                # 执行动作
-                next_state, reward, terminated, truncated, info = self.env.step(low_level_action)
-                done = terminated or truncated
-
-                # 更新状态 - 确保 next_state 是 numpy array
-                if isinstance(next_state, tuple):
-                    next_state = next_state[0]
-                state = np.array(next_state, dtype=np.float32)
-                episode_reward += reward
-                episode_steps += 1
-                total_steps += 1
-
-            total_reward += episode_reward
-
-            # 统计成功和碰撞次数
-            if 'success' in info and info['success']:
-                success_count += 1
-            if terminated:
-                collision_count += 1
-
-            print(f"评估回合 {episode+1}/{eval_episodes} - 奖励: {episode_reward:.2f}, 步数: {episode_steps}")
-
-        avg_reward = total_reward / eval_episodes
-        avg_steps = total_steps / eval_episodes
-        success_rate = success_count / eval_episodes
-        collision_rate = collision_count / eval_episodes
-
-        print(f"评估完成 - 平均奖励: {avg_reward:.2f}, 平均步数: {avg_steps:.1f}")
-        print(f"成功率: {success_rate:.2%}, 碰撞率: {collision_rate:.2%}")
-
-        # 保存详细评估结果到文件
-        os.makedirs("./results", exist_ok=True)
-        evaluation_data = {
-            'avg_reward': avg_reward,
-            'avg_steps': avg_steps,
-            'success_rate': success_rate,
-            'collision_rate': collision_rate,
-            'episodes': eval_episodes
-        }
-        np.save("./results/evaluation_metrics.npy", evaluation_data)
-
-        return avg_reward
     
     def evaluate_detailed(self, eval_episodes=10):
         """使用现有环境进行详细评估（避免环境冲突）
@@ -918,6 +837,7 @@ class HierarchicalRL:
         - 轨迹平滑度 (trajectory_smoothness)
         - 时间成本 (time_cost)
         - 碰撞率 (collision_rate)
+        - 平均奖励 (avg_reward) - 新增用于与原有evaluate方法兼容
         
         参数:
             eval_episodes: 评估的回合数
@@ -934,6 +854,7 @@ class HierarchicalRL:
         total_time_cost = 0.0
         total_path_efficiency = 0.0
         total_trajectory_smoothness = 0.0
+        total_reward = 0.0  # 新增：用于计算平均奖励
         
         for episode in range(eval_episodes):
             print(f"评估回合 {episode+1}/{eval_episodes}")
@@ -950,6 +871,7 @@ class HierarchicalRL:
             trajectory = []
             total_distance = 0.0
             episode_collision = False
+            episode_reward = 0.0  # 新增：记录本回合奖励
             
             # 获取起始位置和目标位置
             if hasattr(self.env, 'gazebo_env'):
@@ -989,6 +911,9 @@ class HierarchicalRL:
                     next_state = next_state[0]
                 state = np.array(next_state, dtype=np.float32)
                 
+                # 记录本回合奖励
+                episode_reward += reward
+                
                 # 记录轨迹
                 if hasattr(self.env, 'gazebo_env'):
                     current_x = self.env.gazebo_env.odom_x
@@ -1006,6 +931,9 @@ class HierarchicalRL:
                     episode_collision = True
                 
                 episode_steps += 1
+            
+            # 累计总奖励
+            total_reward += episode_reward
             
             # 计算评估指标
             time_cost = time.time() - start_time
@@ -1047,6 +975,7 @@ class HierarchicalRL:
                 'time_cost': time_cost,
                 'path_efficiency': path_efficiency,
                 'trajectory_smoothness': smoothness,
+                'reward': episode_reward,  # 新增：记录本回合奖励
                 # 调试数据
                 'debug_straight_line_distance': straight_line_distance,
                 'debug_total_distance': total_distance,
@@ -1067,6 +996,7 @@ class HierarchicalRL:
             'avg_time_cost': total_time_cost / n,
             'avg_path_efficiency': total_path_efficiency / n,
             'avg_trajectory_smoothness': total_trajectory_smoothness / n,
+            'avg_reward': total_reward / n,  # 新增：平均奖励
             # 调试数据
             'avg_straight_line_distance': np.mean([m['debug_straight_line_distance'] for m in episode_metrics]),
             'avg_total_distance': np.mean([m['debug_total_distance'] for m in episode_metrics]),
@@ -1079,6 +1009,7 @@ class HierarchicalRL:
         print(f"详细评估完成:")
         print(f"  成功率: {summary['success_rate']:.2%}")
         print(f"  碰撞率: {summary['collision_rate']:.2%}")
+        print(f"  平均奖励: {summary['avg_reward']:.2f}")  # 新增：显示平均奖励
         print(f"  平均时间成本: {summary['avg_time_cost']:.2f}秒")
         print(f"  平均路径效率: {summary['avg_path_efficiency']:.2%}")
         print(f"  平均轨迹平滑度: {summary['avg_trajectory_smoothness']:.2%}")
@@ -1092,14 +1023,14 @@ class HierarchicalRL:
         print(f"  - 路径效率: 成功回合的路径效率，失败回合为0%")
         print(f"  - 效率比值: {summary['avg_straight_line_distance']:.2f} / {summary['avg_total_distance']:.2f} = {summary['avg_straight_line_distance']/summary['avg_total_distance']:.3f}")
         
-        # 保存详细评估结果
-        os.makedirs("./results", exist_ok=True)
+        # 保存详细评估结果，只保存这一个文件到logs文件夹
+        os.makedirs("./logs", exist_ok=True)
         detailed_evaluation_data = {
             'summary': summary,
             'episode_metrics': episode_metrics,
             'timestamp': time.time()
         }
-        np.save("./results/detailed_evaluation_metrics.npy", detailed_evaluation_data)
+        np.save("./logs/evaluation_metrics.npy", detailed_evaluation_data)
         
         # 记录到TensorBoard
         self._log_evaluation_to_tensorboard(summary)
@@ -1212,6 +1143,10 @@ class HierarchicalRL:
                     agent._logger.record("evaluation/avg_path_efficiency", summary['avg_path_efficiency'])
                     agent._logger.record("evaluation/avg_trajectory_smoothness", summary['avg_trajectory_smoothness'])
                     agent._logger.record("evaluation/episodes", summary['episodes'])
+                    
+                    # 新增：记录平均奖励
+                    if 'avg_reward' in summary:
+                        agent._logger.record("evaluation/avg_reward", summary['avg_reward'])
                     
                     # 记录调试数据
                     agent._logger.record("debug/avg_straight_line_distance", summary['avg_straight_line_distance'])
