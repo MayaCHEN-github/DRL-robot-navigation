@@ -638,14 +638,12 @@ class HierarchicalRL:
                     # 高级智能体的更新条件：每 N 步 AND 缓冲区足够大
                     if H_BUF.size() > self.learn_starts and timestep % self.train_freq == 0:
                         self.high_level_agent.train(batch_size=self.H_BS, gradient_steps=1)
-                        # 记录训练日志到TensorBoard
-                        self._log_training_metrics_to_tensorboard("high_level", timestep, episode_reward)
+                        # 训练时不单独记录日志，统一由下面的每100步记录
 
-                    # 低级智能体的更新条件：只要缓冲区足够大
-                    if L_BUF.size() > self.learn_starts:
+                    # 低级智能体的更新条件：每 N 步 AND 缓冲区足够大
+                    if L_BUF.size() > self.learn_starts and timestep % self.train_freq == 0:
                         self.low_level_agent.train(batch_size=self.L_BS, gradient_steps=1)
-                        # 记录训练日志到TensorBoard
-                        self._log_training_metrics_to_tensorboard("low_level", timestep, episode_reward)
+                        # 训练时不单独记录日志，统一由下面的每100步记录
 
                     # 状态转移
                     state = next_state
@@ -656,8 +654,8 @@ class HierarchicalRL:
                     pbar.update(1)
                     pbar.set_postfix({"回合": episode_count, "当前奖励": f"{episode_reward:.2f}"})
 
-                    # 定期记录训练指标到TensorBoard（每100步记录一次）
-                    if timestep % 100 == 0:
+                    # 定期记录训练指标到TensorBoard（每5000步记录一次，进一步减少日志输出）
+                    if timestep % 5000 == 0:
                         self._log_training_metrics_to_tensorboard("high_level", timestep, episode_reward)
                         self._log_training_metrics_to_tensorboard("low_level", timestep, episode_reward)
 
