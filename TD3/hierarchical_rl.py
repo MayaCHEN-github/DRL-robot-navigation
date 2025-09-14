@@ -367,7 +367,15 @@ class HierarchicalRL:
         # 1) logger（SB3 的 train() 会用到）
         if getattr(agent, "_logger", None) is None:
             from stable_baselines3.common.logger import configure
-            agent._logger = configure(folder=None, format_strings=["stdout"])
+            # 确定TensorBoard日志路径
+            if hasattr(agent, 'tensorboard_log') and agent.tensorboard_log:
+                log_folder = agent.tensorboard_log
+            else:
+                log_folder = "./logs/default"
+            
+            # 确保日志目录存在
+            os.makedirs(log_folder, exist_ok=True)
+            agent._logger = configure(folder=log_folder, format_strings=["stdout", "tensorboard"])
 
         # 2) 进度变量（用于学习率调度）
         if not hasattr(agent, "_current_progress_remaining"):
@@ -630,10 +638,14 @@ class HierarchicalRL:
                     # 高级智能体的更新条件：每 N 步 AND 缓冲区足够大
                     if H_BUF.size() > self.learn_starts and timestep % self.train_freq == 0:
                         self.high_level_agent.train(batch_size=self.H_BS, gradient_steps=1)
+                        # 记录训练日志到TensorBoard
+                        self._log_training_metrics_to_tensorboard("high_level", timestep, episode_reward)
 
                     # 低级智能体的更新条件：只要缓冲区足够大
                     if L_BUF.size() > self.learn_starts:
                         self.low_level_agent.train(batch_size=self.L_BS, gradient_steps=1)
+                        # 记录训练日志到TensorBoard
+                        self._log_training_metrics_to_tensorboard("low_level", timestep, episode_reward)
 
                     # 状态转移
                     state = next_state
@@ -643,6 +655,11 @@ class HierarchicalRL:
                     # 更新进度条
                     pbar.update(1)
                     pbar.set_postfix({"回合": episode_count, "当前奖励": f"{episode_reward:.2f}"})
+
+                    # 定期记录训练指标到TensorBoard（每100步记录一次）
+                    if timestep % 100 == 0:
+                        self._log_training_metrics_to_tensorboard("high_level", timestep, episode_reward)
+                        self._log_training_metrics_to_tensorboard("low_level", timestep, episode_reward)
 
                     # 评估 + 定期手动保存
                     if timestep % self.eval_freq == 0:
@@ -1009,23 +1026,36 @@ class HierarchicalRL:
             if episode_collision:
                 collision_episodes += 1
             
-            # 计算路径效率
-            if total_distance > 0:
-                path_efficiency = straight_line_distance / total_distance
-            else:
-                path_efficiency = 1.0
+            # 计算路径效率（只有成功到达目标时才计算，失败时设为0）
+            if success >= 0.5:  # 成功到达目标
+                if total_distance > 0.1:  # 确保有足够的移动距离
+                    path_efficiency = min(1.0, straight_line_distance / total_distance)
+                else:
+                    path_efficiency = 1.0  # 成功但移动距离很小，认为效率很高
+            else:  # 未成功到达目标
+                path_efficiency = 0.0  # 失败时路径效率为0
+            
             total_path_efficiency += path_efficiency
             
             # 计算轨迹平滑度
             smoothness = self._calculate_trajectory_smoothness(trajectory)
             total_trajectory_smoothness += smoothness
             
-            # 保存回合指标
+            # 保存回合指标（包含调试数据）
             episode_metrics.append({
                 'success_rate': success,
                 'time_cost': time_cost,
                 'path_efficiency': path_efficiency,
-                'trajectory_smoothness': smoothness
+                'trajectory_smoothness': smoothness,
+                # 调试数据
+                'debug_straight_line_distance': straight_line_distance,
+                'debug_total_distance': total_distance,
+                'debug_actual_distance': np.linalg.norm([final_x - start_x, final_y - start_y]) if hasattr(self.env, 'gazebo_env') else 0.0,
+                'debug_start_pos': (start_x, start_y),
+                'debug_final_pos': (final_x, final_y),
+                'debug_goal_pos': (goal_x, goal_y),
+                'debug_trajectory_length': len(trajectory),
+                'debug_episode_steps': episode_steps
             })
         
         # 计算平均指标
@@ -1037,6 +1067,12 @@ class HierarchicalRL:
             'avg_time_cost': total_time_cost / n,
             'avg_path_efficiency': total_path_efficiency / n,
             'avg_trajectory_smoothness': total_trajectory_smoothness / n,
+            # 调试数据
+            'avg_straight_line_distance': np.mean([m['debug_straight_line_distance'] for m in episode_metrics]),
+            'avg_total_distance': np.mean([m['debug_total_distance'] for m in episode_metrics]),
+            'avg_actual_distance': np.mean([m['debug_actual_distance'] for m in episode_metrics]),
+            'avg_trajectory_length': np.mean([m['debug_trajectory_length'] for m in episode_metrics]),
+            'avg_episode_steps': np.mean([m['debug_episode_steps'] for m in episode_metrics]),
         }
         
         # 打印详细评估结果
@@ -1046,6 +1082,15 @@ class HierarchicalRL:
         print(f"  平均时间成本: {summary['avg_time_cost']:.2f}秒")
         print(f"  平均路径效率: {summary['avg_path_efficiency']:.2%}")
         print(f"  平均轨迹平滑度: {summary['avg_trajectory_smoothness']:.2%}")
+        print(f"📊 调试数据:")
+        print(f"  平均直线距离: {summary['avg_straight_line_distance']:.2f}m")
+        print(f"  平均总距离: {summary['avg_total_distance']:.2f}m")
+        print(f"  平均实际距离: {summary['avg_actual_distance']:.2f}m")
+        print(f"  平均轨迹点数: {summary['avg_trajectory_length']:.1f}")
+        print(f"  平均回合步数: {summary['avg_episode_steps']:.1f}")
+        print(f"💡 说明:")
+        print(f"  - 路径效率: 成功回合的路径效率，失败回合为0%")
+        print(f"  - 效率比值: {summary['avg_straight_line_distance']:.2f} / {summary['avg_total_distance']:.2f} = {summary['avg_straight_line_distance']/summary['avg_total_distance']:.3f}")
         
         # 保存详细评估结果
         os.makedirs("./results", exist_ok=True)
@@ -1115,6 +1160,45 @@ class HierarchicalRL:
         except Exception as e:
             print(f"环境清理过程中出现错误: {e}")
     
+    def _log_training_metrics_to_tensorboard(self, agent_type, timestep, episode_reward=None):
+        """记录训练指标到TensorBoard"""
+        try:
+            if agent_type == "high_level":
+                agent = self.high_level_agent
+                prefix = "high_level"
+            else:
+                agent = self.low_level_agent
+                prefix = "low_level"
+            
+            if hasattr(agent, '_logger') and agent._logger is not None:
+                # 记录奖励（如果提供）
+                if episode_reward is not None:
+                    agent._logger.record(f"{prefix}/reward", episode_reward)
+                
+                # 记录经验缓冲区大小
+                if hasattr(agent, 'replay_buffer'):
+                    agent._logger.record(f"{prefix}/buffer_size", agent.replay_buffer.size())
+                
+                # 记录学习率
+                if hasattr(agent, 'learning_rate'):
+                    agent._logger.record(f"{prefix}/learning_rate", agent.learning_rate)
+                
+                # 记录探索参数
+                if agent_type == "high_level" and hasattr(self, 'current_epsilon'):
+                    agent._logger.record(f"{prefix}/epsilon", self.current_epsilon)
+                elif agent_type == "low_level" and hasattr(self, 'current_noise'):
+                    agent._logger.record(f"{prefix}/noise", self.current_noise)
+                
+                # 记录更新次数
+                if hasattr(agent, '_n_updates'):
+                    agent._logger.record(f"{prefix}/n_updates", agent._n_updates)
+                
+                # 记录到TensorBoard
+                agent._logger.dump(step=timestep)
+                
+        except Exception as e:
+            print(f"记录训练指标到TensorBoard时出错: {e}")
+    
     def _log_evaluation_to_tensorboard(self, summary):
         """将评估指标记录到TensorBoard"""
         try:
@@ -1128,6 +1212,14 @@ class HierarchicalRL:
                     agent._logger.record("evaluation/avg_path_efficiency", summary['avg_path_efficiency'])
                     agent._logger.record("evaluation/avg_trajectory_smoothness", summary['avg_trajectory_smoothness'])
                     agent._logger.record("evaluation/episodes", summary['episodes'])
+                    
+                    # 记录调试数据
+                    agent._logger.record("debug/avg_straight_line_distance", summary['avg_straight_line_distance'])
+                    agent._logger.record("debug/avg_total_distance", summary['avg_total_distance'])
+                    agent._logger.record("debug/avg_actual_distance", summary['avg_actual_distance'])
+                    agent._logger.record("debug/avg_trajectory_length", summary['avg_trajectory_length'])
+                    agent._logger.record("debug/avg_episode_steps", summary['avg_episode_steps'])
+                    agent._logger.record("debug/efficiency_ratio", summary['avg_straight_line_distance']/summary['avg_total_distance'])
                     
                     # 记录到TensorBoard
                     agent._logger.dump(step=agent.num_timesteps)
